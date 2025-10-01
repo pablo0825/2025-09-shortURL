@@ -22,3 +22,7 @@
 -- CREATE INDEX IF NOT EXISTS idx_link_logs_link_created_at ON link_logs(created_at);
 
 
+-- ALTER TABLE links ALTER COLUMN code DROP NOT NULL;
+-- CREATE UNIQUE INDEX IF NOT EXISTS links_code_uidx ON links(code) WHERE code IS NOT NULL;
+
+INSERT INTO link_logs (link_id, log_info) VALUES ($1::BIGINT, $2::JSONB)

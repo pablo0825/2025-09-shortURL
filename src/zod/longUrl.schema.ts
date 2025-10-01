@@ -44,33 +44,33 @@ export const longUrlSchema = (opts: NormOpts) => {
                 url.port = '';
             }
 
-        // 空路徑 → '/'
-        if (!url.pathname) url.pathname = '/';
+            // 空路徑 → '/'
+            if (!url.pathname) url.pathname = '/';
 
-        // 合併連續斜線
-        url.pathname = url.pathname.replace(/\/{2,}/g, '/');
+            // 合併連續斜線
+            url.pathname = url.pathname.replace(/\/{2,}/g, '/');
 
-        // 清理/排序 query 參數 (看不太懂)
-        if (stripTrackingParams) {
-            for (const p of STRIP_PARAMS) url.searchParams.delete(p);
+            // 清理/排序 query 參數 (看不太懂)
+            if (stripTrackingParams) {
+                for (const p of STRIP_PARAMS) url.searchParams.delete(p);
 
-            const entries = Array.from(url.searchParams.entries()).sort(([a],[b]) => a.localeCompare(b));
+                const entries = Array.from(url.searchParams.entries()).sort(([a],[b]) => a.localeCompare(b));
 
-            url.search = entries.length ? '?' + entries.map(([k,v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&') : '';
-        }
-
-        // 是否保留#...後面的內容
-        if(!allowHash) url.hash = "";
-
-        // 禁止把短網址再次變成短網址
-        if(shortDomain) {
-            const sd = shortDomain.toLowerCase();
-
-            if (url.hostname === sd || url.hostname.endsWith("." + sd)) {
-                throw new Error("不允許短網址作為長網址");
+                url.search = entries.length ? '?' + entries.map(([k,v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&') : '';
             }
-        }
 
-        return url.toString();
+            // 是否保留#...後面的內容
+            if(!allowHash) url.hash = "";
+
+            // 禁止把短網址再次變成短網址
+            if(shortDomain) {
+                const sd = shortDomain.toLowerCase();
+
+                if (url.hostname === sd || url.hostname.endsWith("." + sd)) {
+                    throw new Error("不允許短網址作為長網址");
+                }
+            }
+
+            return url.toString();
     })
 };

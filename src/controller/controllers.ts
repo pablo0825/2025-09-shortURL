@@ -20,7 +20,7 @@ const LongUrlSchema = longUrlSchema({
     maxLength: 2048,
 });
 
-export const handleCreateShortUrl = async (req: Request, res: Response) => {
+export const createShortUrl = async (req: Request, res: Response) => {
     let client: PoolClient | undefined;
     try {
         // 驗證url是否存在
@@ -102,6 +102,69 @@ export const handleCreateShortUrl = async (req: Request, res: Response) => {
         });
     } finally {
         // 釋放連線資源
+        if (client) client.release();
+    }
+}
+
+export const redirectToLongUrl = async (req: Request, res: Response) => {
+    const code = req.params.code ?? "";
+    if(!code) {
+        return res.status(400).send("short_code是必須的");
+    }
+
+    const log = {
+        ip:req.ip ?? null,
+        ua:req.get("user-agent") ?? null, // 判斷使用者的瀏覽器、作業系統
+        referer:req.get("referer") ?? null, // 判斷使用者從哪裡來
+        path: req.originalUrl,
+        at: new Date().toISOString(),
+    };
+
+    let client: PoolClient | undefined;
+    try {
+        client = await pool.connect();
+
+        const query = await client.query<{
+            id:string;
+            long_trl:string;
+            is_active:boolean;
+            expire_at: Date;
+        }>(`SELECT id::text, long_url, is_active, expire_at FROM links WHERE code = $1 AND is_active = TRUE AND expire_at > now() LIMIT 1`, [code]);
+
+        if(query.rowCount === 0) {
+            return res.status(404).json({
+                ok: false,
+                error: "shortURL 不存在",
+            })
+        }
+
+        const { id, long_trl, is_active, expire_at } = query.rows[0];
+
+        if(!is_active) {
+            return res.status(403).json({
+                ok: false,
+                error:"shortURL 已停用"
+            })
+        }
+        if(new Date(expire_at) <= new Date()) {
+            return res.status(410).json({
+                ok: false,
+                error:"shortURL 已過期"
+            })
+        }
+
+        pool.query(`INSERT INTO link_logs (link_id, log_info) VALUES ($1::BIGINT, $2::JSONB)`, [id, log]).catch(() => {});
+
+        // 302轉址
+        return res.redirect(302, long_trl)
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+
+        return res.status(500).json({
+            ok: false,
+            error: msg
+        })
+    } finally {
         if (client) client.release();
     }
 }
