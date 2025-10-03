@@ -2,13 +2,13 @@
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
 export type Link = {
-    id:number;
+    id: string;
     code:string;
     long_url:string;
     created_at:Date | string;
     expire_at:Date | string;
-    creator_ip: string | null;
     is_active: boolean;
+    total_count: string;
 }
 
 export type LinkLog = {

@@ -28,9 +28,6 @@ export class Base62 {
     // 10 → base62
     // 12345 → 9ix
     private _encodeNumber (num:bigint):string {
-        if (!Number.isInteger(num)) {
-            throw new Error('Please input a non-negative integer.');
-        }
         if (num < 0n) {
             throw new Error("Please input a non-negative integer.");
         }

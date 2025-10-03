@@ -7,8 +7,12 @@ import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 // 引入變數
 import { pool } from "./pool.js";
+import router from "./route/link.route";
 
 const app = express();
+
+app.use(express.json());
+
 const port = Number(process.env.PORT ?? 3001);
 
 //
@@ -30,6 +34,8 @@ app.get("/health", async (_req:Request, res:Response) => {
         })
     }
 });
+
+app.use("/api/link", router);
 
 console.log('About to listen on', port);
 app.listen(port, () => {

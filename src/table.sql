@@ -25,4 +25,8 @@
 -- ALTER TABLE links ALTER COLUMN code DROP NOT NULL;
 -- CREATE UNIQUE INDEX IF NOT EXISTS links_code_uidx ON links(code) WHERE code IS NOT NULL;
 
-INSERT INTO link_logs (link_id, log_info) VALUES ($1::BIGINT, $2::JSONB)
+-- ALTER TABLE links ADD COLUMN short_url TEXT;
+
+-- ALTER TABLE links DROP COLUMN short_url;
+
+DELETE FROM links WHERE id IN (4, 5, 6, 7, 8, 9, 10, 11, 12);
