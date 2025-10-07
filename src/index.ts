@@ -8,6 +8,7 @@ import type { Request, Response, NextFunction } from 'express';
 // 引入變數
 import { pool } from "./pool.js";
 import router from "./route/link.route";
+import { redirectToLongUrl } from "./controller/link.controllers";
 
 const app = express();
 
@@ -15,6 +16,7 @@ app.use(express.json());
 
 const port = Number(process.env.PORT ?? 3001);
 
+app.use("/api/link", router);
 //
 app.get("/health", async (_req:Request, res:Response) => {
     try {
@@ -35,7 +37,9 @@ app.get("/health", async (_req:Request, res:Response) => {
     }
 });
 
-app.use("/api/link", router);
+app.get("/:code", redirectToLongUrl);
+
+app.use((_req:Request, res:Response) => res.status(404).send("Not Found"));
 
 console.log('About to listen on', port);
 app.listen(port, () => {

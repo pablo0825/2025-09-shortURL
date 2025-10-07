@@ -29,4 +29,3 @@
 
 -- ALTER TABLE links DROP COLUMN short_url;
 
-DELETE FROM links WHERE id IN (4, 5, 6, 7, 8, 9, 10, 11, 12);

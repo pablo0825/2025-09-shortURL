@@ -1,4 +1,4 @@
-// controllers.ts
+// link.controllers.ts
 import { Request, Response } from "express";
 import type { PoolClient} from "pg";
 import { pool } from "../pool";
@@ -20,6 +20,9 @@ const LongUrlSchema = longUrlSchema({
     stripTrackingParams: true,
     maxLength: 2048,
 });
+
+const MIN_LENGTH = 5;
+const OFFSET = BigInt(62 ** (MIN_LENGTH - 1));
 
 export const createShortUrl = async (req: Request, res: Response) => {
     let client: PoolClient | undefined;
@@ -66,7 +69,7 @@ export const createShortUrl = async (req: Request, res: Response) => {
         const ins = await client.query<{ id:string }>(`INSERT INTO links (long_url, creator_ip) VALUES ($1, $2::INET) RETURNING id`, [result.data, ip ?? null]);
 
         const id = BigInt(ins.rows[0].id);
-        const code = base62.encode10to62(id);
+        const code = base62.encode10to62(id + OFFSET);
 
         // 把code, short_url, id更新到links，回傳code
         const upd = await client.query<{ code: string }>(
@@ -120,7 +123,7 @@ export const redirectToLongUrl = async (req: Request, res: Response) => {
     try {
         const query = await pool.query<{
             id:string;
-            long_trl:string;
+            long_url:string;
             is_active:boolean;
             expire_at: Date;
         }>(`SELECT id::text, long_url, is_active, expire_at FROM links WHERE code = $1 AND is_active = TRUE AND expire_at > now() LIMIT 1`, [code]);
@@ -133,7 +136,7 @@ export const redirectToLongUrl = async (req: Request, res: Response) => {
             })
         }
 
-        const { id, long_trl, is_active, expire_at } = query.rows[0];
+        const { id, long_url, is_active, expire_at } = query.rows[0];
 
         if(!is_active) {
             return res.status(403).json({
@@ -152,7 +155,7 @@ export const redirectToLongUrl = async (req: Request, res: Response) => {
         writeLogToDB(req, id, "link被使用");
 
         // 302轉址
-        return res.redirect(302, long_trl)
+        return res.redirect(302, long_url)
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
 
