@@ -6,9 +6,14 @@ import { Base62 } from "../utils/base62";
 import { Link } from "../type/types";
 import { longUrlSchema } from "../zod/longUrl.schema";
 import { writeLogToDB } from "../utils/witeLogToDB";
+import redis from "../redis/redisClient";
+import { isForbiddenTarget,getEffectivePort } from "../utils/isForbiddenTarget";
 
 const base62 = new Base62();
 const SHORT_BASE_URL = process.env.SHORT_BASE_URL?.replace(/\/+$/, '') || "http://localhost:3001";
+//
+const ALLOW_NON_STANDARD_PORTS = false;
+const ALLOWED_PORTS = new Set([80, 443]);
 
 if (!SHORT_BASE_URL) {
     throw new Error("沒有正確的URL");
@@ -37,6 +42,22 @@ export const createShortUrl = async (req: Request, res: Response) => {
                error: msg,
            });
        }
+
+       const longUrl:string = result.data;
+
+        // 拒絕帶 \r 或 \n 的 URL
+        if (/[\r\n]/.test(longUrl)) {
+            return res.status(500).json({ ok: false, error: "快取中的 URL 非法" });
+        }
+
+        // 判斷hostname是否合法，不能本機或內網的url
+        const verdict:boolean = await isForbiddenTarget(longUrl);
+        if (verdict) {
+            return res.status(400).json({
+                ok:false,
+                error:"不允許的目標主機"
+            });
+        }
 
        const ip:string | null = req.ip ?? null;
 
@@ -115,17 +136,89 @@ export const createShortUrl = async (req: Request, res: Response) => {
 }
 
 export const redirectToLongUrl = async (req: Request, res: Response) => {
-    const code = req.params.code ?? "";
+    const raw = req.params.code ?? "";
+    // .trim() 移除前後空字串
+    const code = raw.trim();
     if(!code) {
         return res.status(400).send("short_code是必須的");
     }
 
+    // 限制code的字串必須要在64位的字串中
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(code)) {
+        return res.status(400).send("short_code格式不正確");
+    }
+
+    // 規範化字串，方便在redis中查詢
+    const redisKey = `short:${code}`;
+
     try {
+        // 查key，返回value
+        // 所以redis中的資料會是 redisKey: long_url
+        const cached:string | null = await redis.get(redisKey);
+        if (cached) {
+            const url:string = cached;
+
+            // 拒絕帶 \r 或 \n 的 URL
+            if (/[\r\n]/.test(cached)) {
+                return res.status(500).json({ ok: false, error: "快取中的 URL 非法" });
+            }
+
+            let u:URL;
+            try {
+                u = new URL(url);
+            } catch (err) {
+                return res.status(500).json({
+                    ok: false,
+                    error: "快取中的 URL 非法"
+                });
+            }
+
+            // 安全性：只允許 http / https
+            if (u.protocol !== "https:" && u.protocol !== "http:") {
+                return res.status(500).json({
+                    ok: false,
+                    error: "快取中的 URL 非法"
+                });
+            }
+
+            // 僅允許80, 443 port通行
+            const port:number = getEffectivePort(u);
+            if (!ALLOW_NON_STANDARD_PORTS && !ALLOWED_PORTS.has(port)) {
+                return res.status(400).json({
+                    ok: false,
+                    error: "不允許的通訊埠"
+                });
+            }
+
+            // 檢查url是否超過2048字元
+            if (cached.length > 2048) {
+                return res.status(400).json({
+                    ok:false,
+                    error:"URL 過長"
+                });
+            }
+
+            // 判斷hostname是否合法，不能本機或內網的url
+            const verdict:boolean = await isForbiddenTarget(u.hostname);
+            if (verdict) {
+                return res.status(400).json({
+                    ok:false,
+                    error:"不允許的目標主機"
+                });
+            }
+
+            // 把log紀錄寫入到link_log中
+            writeLogToDB(req, "null", "link被使用(快取命中)")
+
+            return res.redirect(302, url);
+        }
+
+        // 如果redis沒有的話，到db查
         const query = await pool.query<{
             id:string;
             long_url:string;
             is_active:boolean;
-            expire_at: Date;
+            expire_at: string;
         }>(`SELECT id::text, long_url, is_active, expire_at FROM links WHERE code = $1 AND is_active = TRUE AND expire_at > now() LIMIT 1`, [code]);
 
         // 回傳多少筆資料。按照上面的query，結果只能是0和1
@@ -136,6 +229,7 @@ export const redirectToLongUrl = async (req: Request, res: Response) => {
             })
         }
 
+        // 從query中解構出id, long_url, is_active, expire_at等資料
         const { id, long_url, is_active, expire_at } = query.rows[0];
 
         if(!is_active) {
@@ -144,15 +238,70 @@ export const redirectToLongUrl = async (req: Request, res: Response) => {
                 error:"shortURL 已停用"
             })
         }
-        if(new Date(expire_at) <= new Date()) {
+        // expire_at被pg傳出來時是字串，需要轉換為時間
+        const expireAt = new Date(expire_at);
+        // 檢查expireAt是否為NaN(無效)，以及是否過期
+        if (Number.isNaN(expireAt.getTime()) || expireAt <= new Date()) {
             return res.status(410).json({
                 ok: false,
                 error:"shortURL 已過期"
             })
         }
 
+        // 拒絕帶 \r 或 \n 的 URL
+        if (/[\r\n]/.test(long_url)) {
+            return res.status(500).json({ ok: false, error: "快取中的 URL 非法" });
+        }
+
+        let u2:URL;
+        try {
+            u2 = new URL(long_url);
+        } catch (err) {
+            return res.status(500).json({ ok: false, error: "資料庫中的 URL 非法" });
+        }
+
+        // 安全性：只允許 http / https
+        if (u2.protocol !== "https:" && u2.protocol !== "http:") {
+            return res.status(500).json({
+                ok: false,
+                error: "資料庫中的 URL 非法"
+            });
+        }
+
+        // 僅允許80, 443 port通行
+        const port:number = getEffectivePort(u2);
+        if (!ALLOW_NON_STANDARD_PORTS && !ALLOWED_PORTS.has(port)) {
+            return res.status(400).json({
+                ok: false,
+                error: "不允許的通訊埠"
+            });
+        }
+
+        // 檢查url是否超過2048字元
+        if (long_url.length > 2048) {
+            return res.status(400).json({
+                ok:false,
+                error:"URL 過長"
+            });
+        }
+
+        // 限制url不能為內網/本機端的url
+        const verdict2:boolean = await isForbiddenTarget(u2.hostname);
+        if (verdict2) {
+            return res.status(400).json({
+                ok:false,
+                error:"不允許的目標主機"
+            });
+        }
+
         // 把log紀錄寫入到link_log中
         writeLogToDB(req, id, "link被使用");
+
+        // 轉換為秒，向上取整，確保ttl至少為1
+        const ttl = Math.max(1, Math.ceil((expireAt.getTime() - Date.now()) / 1000));
+
+        // 寫入redis
+        await redis.setEx(redisKey, ttl, long_url);
 
         // 302轉址
         return res.redirect(302, long_url)

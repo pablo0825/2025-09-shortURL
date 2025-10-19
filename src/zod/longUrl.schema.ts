@@ -1,3 +1,4 @@
+// longUrl.schema.ts
 import { z } from "zod";
 
 const SAFE_SCHEMES = new Set(['http:', 'https:']);
