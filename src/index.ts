@@ -9,6 +9,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { pool } from "./pool.js";
 import router from "./route/link.route";
 import { redirectToLongUrl } from "./controller/link.controllers";
+import { cacheShortUrl } from "./middleware/cacheShortUrl";
 
 const app = express();
 
@@ -37,7 +38,8 @@ app.get("/health", async (_req:Request, res:Response) => {
     }
 });
 
-app.get("/:code", redirectToLongUrl);
+// 加入快取作為中介層
+app.get("/:code", cacheShortUrl, redirectToLongUrl);
 
 app.use((_req:Request, res:Response) => res.status(404).send("Not Found"));
 

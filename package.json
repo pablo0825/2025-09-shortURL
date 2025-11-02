@@ -18,6 +18,7 @@
   },
   "private": true,
   "dependencies": {
+    "crypto": "^1.0.1",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
     "ipaddr.js": "^2.2.0",

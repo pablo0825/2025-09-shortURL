@@ -7,13 +7,11 @@ import { Link } from "../type/types";
 import { longUrlSchema } from "../zod/longUrl.schema";
 import { writeLogToDB } from "../utils/witeLogToDB";
 import redis from "../redis/redisClient";
-import { isForbiddenTarget,getEffectivePort } from "../utils/isForbiddenTarget";
+import { isForbiddenTarget } from "../utils/isForbiddenTarget";
+import * as crypto from "node:crypto";
 
 const base62 = new Base62();
 const SHORT_BASE_URL = process.env.SHORT_BASE_URL?.replace(/\/+$/, '') || "http://localhost:3001";
-//
-const ALLOW_NON_STANDARD_PORTS = false;
-const ALLOWED_PORTS = new Set([80, 443]);
 
 if (!SHORT_BASE_URL) {
     throw new Error("沒有正確的URL");
@@ -44,14 +42,11 @@ export const createShortUrl = async (req: Request, res: Response) => {
        }
 
        const longUrl:string = result.data;
-
-        // 拒絕帶 \r 或 \n 的 URL
-        if (/[\r\n]/.test(longUrl)) {
-            return res.status(500).json({ ok: false, error: "快取中的 URL 非法" });
-        }
+       const u:URL = new URL(longUrl);
 
         // 判斷hostname是否合法，不能本機或內網的url
-        const verdict:boolean = await isForbiddenTarget(longUrl);
+        const verdict:boolean = await isForbiddenTarget(u.hostname);
+        console.log(verdict);
         if (verdict) {
             return res.status(400).json({
                 ok:false,
@@ -65,26 +60,6 @@ export const createShortUrl = async (req: Request, res: Response) => {
         // 開始交易
         client = await pool.connect();
         await client.query('BEGIN');
-
-        // 一次性寫法，但遇到不知道怎麼解決的bug
-        // // 查詢links中的id欄位，並將回傳值取名為seq
-        // // 查詢序列名稱
-        // const seqNameResult = await client.query(`SELECT pg_get_serial_sequence('links', 'id') AS seq`);
-        // // ??運算式，左側為null，則給右值；左側有值，則給左值
-        // const seqName = seqNameResult.rows[0]?.seq ?? "links_id_seq";
-        //
-        // // 用序列名稱產生唯一值
-        // const rSeq = await client.query<{ id: string }>(`SELECT nextval($1) AS id`, [seqName]);
-        // const id = BigInt(rSeq.rows[0].id);
-        // const code = base62.encode10to62(id);
-        //
-        // // 將資料插入到links，然後回傳code值
-        // const r2 = await client.query<{ code: string }>(
-        //     `INSERT INTO links (id, code, long_url, creator_ip) OVERRIDING SYSTEM VALUE
-        //      VALUES ($1::BIGINT, $2, $3, $4::INET)
-        //      RETURNING code`,
-        //     [id.toString(), code, longUrl, ip ?? null]
-        // );
 
         // 把longURL, ip插入到links，回傳id
         const ins = await client.query<{ id:string }>(`INSERT INTO links (long_url, creator_ip) VALUES ($1, $2::INET) RETURNING id`, [result.data, ip ?? null]);
@@ -135,6 +110,9 @@ export const createShortUrl = async (req: Request, res: Response) => {
     }
 }
 
+// 運用快取加速URL轉跳的速度
+// 用負向快取預防大量不存在的shortURL攻擊
+// 單飛鎖：在多人重定向的情況下，確保只有一個人可以進到db，其他人進入等待模式
 export const redirectToLongUrl = async (req: Request, res: Response) => {
     const raw = req.params.code ?? "";
     // .trim() 移除前後空字串
@@ -148,71 +126,57 @@ export const redirectToLongUrl = async (req: Request, res: Response) => {
         return res.status(400).send("short_code格式不正確");
     }
 
-    // 規範化字串，方便在redis中查詢
-    const redisKey = `short:${code}`;
+    const key = `short:${code}`;
+    const tomb = `short404:${code}`;
+    // 單飛鎖
+    const lockKey = `lock:short:${code}`;
+    // 傳入的參數，ms是秒數
+    const sleep = (ms:number) => new Promise(resolve => setTimeout(resolve, ms));
+
+    // 建立一把鎖
+    const token = crypto.randomUUID();
+    // 把lockKey上鎖
+    const locked = await redis.set(lockKey, token, { NX: true, PX: 3000 });
+    // 當其他人先拿到上鎖的locked的話
+    if (!locked) {
+        // 沒有上鎖的話
+        // 第一次嘗試
+        // 暫停0.8秒，讓先行者去查db，建立cache
+        await sleep(80);
+        // 負向快取
+        if(await redis.exists(tomb)) {
+            return res.status(404).json({
+                ok: false,
+                error: "shortURL 不存在(redis)"
+            });
+        }
+        // 正向快取
+        const retry1 = await redis.get(key);
+        // 有抓到快取的話，就進行重定向
+        if (retry1) return res.redirect(302, retry1);
+        //
+        // 第二次嘗試，給網路速度較慢的使用者
+        await sleep(80);
+        // 負向快取
+        if(await redis.exists(tomb)) {
+            return res.status(404).json({
+                ok: false,
+                error: "shortURL 不存在(redis)"
+            });
+        }
+        // 正向快取
+        const retry2 = await redis.get(key);
+        // 有抓到快取的話，就進行重定向
+        if (retry2) return res.redirect(302, retry2);
+
+        // 最後防線，如果上面都抓不到的話，就直接判定為不存在
+        return res.status(404).json({
+            ok: false,
+            error: "shortURL 不存在(redis)"
+        })
+    }
 
     try {
-        // 查key，返回value
-        // 所以redis中的資料會是 redisKey: long_url
-        const cached:string | null = await redis.get(redisKey);
-        if (cached) {
-            const url:string = cached;
-
-            // 拒絕帶 \r 或 \n 的 URL
-            if (/[\r\n]/.test(cached)) {
-                return res.status(500).json({ ok: false, error: "快取中的 URL 非法" });
-            }
-
-            let u:URL;
-            try {
-                u = new URL(url);
-            } catch (err) {
-                return res.status(500).json({
-                    ok: false,
-                    error: "快取中的 URL 非法"
-                });
-            }
-
-            // 安全性：只允許 http / https
-            if (u.protocol !== "https:" && u.protocol !== "http:") {
-                return res.status(500).json({
-                    ok: false,
-                    error: "快取中的 URL 非法"
-                });
-            }
-
-            // 僅允許80, 443 port通行
-            const port:number = getEffectivePort(u);
-            if (!ALLOW_NON_STANDARD_PORTS && !ALLOWED_PORTS.has(port)) {
-                return res.status(400).json({
-                    ok: false,
-                    error: "不允許的通訊埠"
-                });
-            }
-
-            // 檢查url是否超過2048字元
-            if (cached.length > 2048) {
-                return res.status(400).json({
-                    ok:false,
-                    error:"URL 過長"
-                });
-            }
-
-            // 判斷hostname是否合法，不能本機或內網的url
-            const verdict:boolean = await isForbiddenTarget(u.hostname);
-            if (verdict) {
-                return res.status(400).json({
-                    ok:false,
-                    error:"不允許的目標主機"
-                });
-            }
-
-            // 把log紀錄寫入到link_log中
-            writeLogToDB(req, "null", "link被使用(快取命中)")
-
-            return res.redirect(302, url);
-        }
-
         // 如果redis沒有的話，到db查
         const query = await pool.query<{
             id:string;
@@ -223,65 +187,39 @@ export const redirectToLongUrl = async (req: Request, res: Response) => {
 
         // 回傳多少筆資料。按照上面的query，結果只能是0和1
         if(query.rowCount === 0) {
+            // 寫入負向快取
+            await redis.set(`short404:${code}`, JSON.stringify({ reason: "NOT_FOUND_OR_INACTIVE_OR_EXPIRED" }), { EX: 60 });
             return res.status(404).json({
                 ok: false,
-                error: "shortURL 不存在",
+                error: "shortURL 不存在(db)",
             })
         }
 
         // 從query中解構出id, long_url, is_active, expire_at等資料
-        const { id, long_url, is_active, expire_at } = query.rows[0];
+        const { id, long_url, expire_at } = query.rows[0];
 
-        if(!is_active) {
-            return res.status(403).json({
-                ok: false,
-                error:"shortURL 已停用"
-            })
-        }
         // expire_at被pg傳出來時是字串，需要轉換為時間
         const expireAt = new Date(expire_at);
-        // 檢查expireAt是否為NaN(無效)，以及是否過期
-        if (Number.isNaN(expireAt.getTime()) || expireAt <= new Date()) {
-            return res.status(410).json({
+
+        // 驗證url是否存在
+        const result = LongUrlSchema.safeParse(long_url);
+        if (!result.success) {
+            const msg = result.error.issues[0]?.message ?? "無效的URL";
+            return res.status(400).json({
                 ok: false,
-                error:"shortURL 已過期"
-            })
+                error: msg,
+            });
         }
 
-        // 拒絕帶 \r 或 \n 的 URL
-        if (/[\r\n]/.test(long_url)) {
-            return res.status(500).json({ ok: false, error: "快取中的 URL 非法" });
-        }
+        const longUrl:string = result.data;
 
         let u2:URL;
         try {
-            u2 = new URL(long_url);
+            u2 = new URL(longUrl);
         } catch (err) {
-            return res.status(500).json({ ok: false, error: "資料庫中的 URL 非法" });
-        }
-
-        // 安全性：只允許 http / https
-        if (u2.protocol !== "https:" && u2.protocol !== "http:") {
             return res.status(500).json({
                 ok: false,
-                error: "資料庫中的 URL 非法"
-            });
-        }
-
-        // 僅允許80, 443 port通行
-        const port:number = getEffectivePort(u2);
-        if (!ALLOW_NON_STANDARD_PORTS && !ALLOWED_PORTS.has(port)) {
-            return res.status(400).json({
-                ok: false,
-                error: "不允許的通訊埠"
-            });
-        }
-
-        // 檢查url是否超過2048字元
-        if (long_url.length > 2048) {
-            return res.status(400).json({
-                ok:false,
-                error:"URL 過長"
+                error: "非法的URL"
             });
         }
 
@@ -290,7 +228,7 @@ export const redirectToLongUrl = async (req: Request, res: Response) => {
         if (verdict2) {
             return res.status(400).json({
                 ok:false,
-                error:"不允許的目標主機"
+                error:"不允許的目標主機(資料庫)"
             });
         }
 
@@ -301,10 +239,10 @@ export const redirectToLongUrl = async (req: Request, res: Response) => {
         const ttl = Math.max(1, Math.ceil((expireAt.getTime() - Date.now()) / 1000));
 
         // 寫入redis
-        await redis.setEx(redisKey, ttl, long_url);
+        await redis.setEx(`short:${code}`, ttl, longUrl);
 
         // 302轉址
-        return res.redirect(302, long_url)
+        return res.redirect(302, longUrl)
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
 
@@ -312,6 +250,16 @@ export const redirectToLongUrl = async (req: Request, res: Response) => {
             ok: false,
             error: msg
         })
+    } finally {
+        // 安全解鎖：只有持有相同 token 的程式才能刪這把鎖
+        const unlockScript = `if redis.call("GET", KEYS[1]) == ARGV[1] then
+            return redis.call("DEL", KEYS[1])
+            else
+            return 0
+            end`;
+        try {
+            await redis.eval(unlockScript, { keys: [lockKey], arguments: [token] });
+        } catch { /* 忽略解鎖錯誤，不影響回應 */ }
     }
 }
 
@@ -445,6 +393,7 @@ export const deleteLink = async (req: Request, res: Response) => {
 export const deactivateLink = async (req: Request, res: Response) => {
     try {
         const id = (req.params.id ?? "").trim();
+
         if (!/^\d+$/.test(id)) {
             return res.status(400).json({
                 ok: false,
@@ -452,7 +401,7 @@ export const deactivateLink = async (req: Request, res: Response) => {
             })
         }
 
-        const query = await pool.query(`UPDATE links SET is_active = FALSE WHERE id = $1::BIGINT AND expire_at > now();`, [id]);
+        const query = await pool.query(`UPDATE links SET is_active = FALSE WHERE id = $1::BIGINT AND expire_at > now() AND is_active = TRUE;`, [id]);
         // 成功更新
         if(query.rowCount === 1) {
             // 寫入log紀錄

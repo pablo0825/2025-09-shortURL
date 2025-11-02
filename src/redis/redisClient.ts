@@ -24,7 +24,7 @@ redis.on("error", (err) => {
     try {
         await redis.connect(); //連線
         await redis.ping(); // 檢查連線是否正常
-        console.log("✅ Redis connected successfully!");
+        console.log("✅ Redis 連線成功!");
     } catch (err) {
         console.error("❌ Redis connection failed:", err);
     }

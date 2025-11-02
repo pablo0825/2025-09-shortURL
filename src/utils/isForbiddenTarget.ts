@@ -2,7 +2,10 @@
  import ipaddr from "ipaddr.js"
 import dns from "node:dns/promises"
 
-export async function isForbiddenTarget (hostname: string): Promise<boolean> {
+ const FORBIDDEN_RANGES = new Set(["loopback", "private", "linkLocal", "uniqueLocal"]);
+
+ // 判斷hostname是否為內網/本機端的url
+ export async function isForbiddenTarget (hostname: string): Promise<boolean> {
     try {
         // dns解析
         const addresses = await dns.lookup(hostname, { all: true });
@@ -24,10 +27,4 @@ export async function isForbiddenTarget (hostname: string): Promise<boolean> {
         // dns解析失敗
         return true;
     }
-}
-
-export function getEffectivePort (u: URL): number {
-     // port必定為數字
-     if (u.port) return Number(u.port);
-     return u.protocol === "https:" ? 443 : 80;
 }
