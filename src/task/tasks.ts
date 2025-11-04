@@ -13,23 +13,3 @@ cron.schedule("0 12 * * *", async () => {
 }, {
     timezone: "Asia/Taipei" // 指定台灣台北時區
 });
-
-// 每10分鐘，從link_task中拿pending的資料，來建立快取
-cron.schedule("0 12 * * *", async () => {
-    try {
-        const query = await pool.query('SELECT * FROM link_task');
-        if (query.rowCount === 0) {
-            console.log("link_task table，目前沒有待處理的資料");
-        }
-
-
-
-
-    } catch (err) {
-
-    } finally {
-
-    }
-}, {
-    timezone: "Asia/Taipei" // 指定台灣台北時區
-})
