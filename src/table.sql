@@ -27,5 +27,38 @@
 
 -- ALTER TABLE links ADD COLUMN short_url TEXT;
 
--- ALTER TABLE links DROP COLUMN short_url;
+-- ALTER TABLE links DROP COLUMN short_url
 
+-- 2025/11/04 建立link_task
+-- CREATE TYPE link_task_status AS ENUM ('pending', 'processing', 'done', 'failed');
+--
+-- CREATE TABLE link_task (
+--     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY , -- 主鍵
+--     link_id BIGINT NOT NULL REFERENCES links(id) ON DELETE CASCADE , -- 外鍵，引用自link_id
+--     payload JSONB NOT NULL DEFAULT '{}'::jsonb, -- 封包，存code, long_url, expire_at等
+--     status link_task_status NOT NULL DEFAULT 'pending', -- 任務狀態，預設是pending
+--     attempts INTEGER NOT NULL DEFAULT 0, -- 重試次數
+--     available_at TIMESTAMPTZ NOT NULL DEFAULT now(), -- 下次可以執行的時間
+--     locked_at     TIMESTAMPTZ, -- worker 鎖定時間
+--     locked_by     TEXT, -- 被哪個 worker 取用
+--     processed_at TIMESTAMPTZ, -- 成功完成時間
+--     last_error TEXT, -- 最近一次錯誤的原因
+--     last_error_at TIMESTAMPTZ, -- 最近一次錯誤的時間
+--     created_at TIMESTAMPTZ NOT NULL DEFAULT now()  -- 創建時間
+-- );
+--
+-- -- 建立索引
+-- -- 複合式索引
+-- CREATE INDEX IF NOT EXISTS idx_link_task_available ON link_task(status, available_at);
+--
+-- -- 限制同一個link_id在pending/processing期間，只能保留一筆
+-- CREATE UNIQUE INDEX IF NOT EXISTS ux_link_task_dedup ON link_task(link_id) WHERE status IN ('pending','processing');
+--
+-- -- 限制payload帶的資料，且不能為空
+-- ALTER TABLE link_task ADD CONSTRAINT chk_payload_has_keys CHECK (payload ? 'code' AND payload ? 'long_url' AND payload ? 'expire_at');
+
+-- UPDATE link_task SET status = 'pending' WHERE status = 'processing';
+
+-- UPDATE link_task SET status = $1, processed_at = S2 WHERE status = $3
+
+UPDATE link_task SET status = $1, last_error = $2, last_error_at = $3 WHERE status = $4 AND processed_at IS NULL

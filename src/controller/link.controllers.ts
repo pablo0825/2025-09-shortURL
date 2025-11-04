@@ -27,6 +27,7 @@ const LongUrlSchema = longUrlSchema({
 const MIN_LENGTH = 5;
 const OFFSET = BigInt(62 ** (MIN_LENGTH - 1));
 
+// 建立shortUrl，同時把shortUrl的資料推到link_task中
 export const createShortUrl = async (req: Request, res: Response) => {
     let client: PoolClient | undefined;
     try {
@@ -61,17 +62,28 @@ export const createShortUrl = async (req: Request, res: Response) => {
         client = await pool.connect();
         await client.query('BEGIN');
 
-        // 把longURL, ip插入到links，回傳id
-        const ins = await client.query<{ id:string }>(`INSERT INTO links (long_url, creator_ip) VALUES ($1, $2::INET) RETURNING id`, [result.data, ip ?? null]);
+        // 把longURL, ip插入到links，回傳id, long_url, expire_at
+        const ins = await client.query<{
+            id: string,
+            long_url: string,
+            expire_at: string | null
+        }>(`INSERT INTO links (long_url, creator_ip) VALUES ($1, $2::INET) RETURNING id, long_url, expire_at`, [longUrl, ip ?? null]);
 
-        const id = BigInt(ins.rows[0].id);
-        const code = base62.encode10to62(id + OFFSET);
+        const idStr:string = ins.rows[0].id;  // 用字串避免 JS number 精度
+        const idBig:bigint = BigInt(idStr); // 把字串轉型為bigint
+        const code:string = base62.encode10to62(idBig + OFFSET);
 
         // 把code, short_url, id更新到links，回傳code
         const upd = await client.query<{ code: string }>(
             `UPDATE links SET code = $1 WHERE id = $2::BIGINT RETURNING code`,
-            [code, id.toString()]
+            [code, idStr]
         );
+
+        // 把code, long_url, expire_at組成payload物件包
+        const payloadObject = { code, long_url:ins.rows[0].long_url, expire_at:ins.rows[0].expire_at };
+
+        // 把id, payload等資料插入到link_task
+        await client.query('INSERT INTO link_task (link_id, payload, available_at) VALUES ($1::BIGINT, $2::jsonb, now())', [idBig, payloadObject]) ;
 
         // 提交交易 (成功寫入資料到資料庫)
         await client.query("COMMIT");
@@ -79,8 +91,7 @@ export const createShortUrl = async (req: Request, res: Response) => {
         // 組成shortURL
         const shortUrl:string = new URL(`/${code}`, SHORT_BASE_URL).toString();
         // 寫入log紀錄
-        writeLogToDB(req, String(id), `新增link ${shortUrl}`);
-
+        writeLogToDB(req, String(idStr), `新增link ${shortUrl}`);
 
         // 201 表示伺服器已完成請求，並建立一個新的資源。通常用於post, put，有改變伺服器狀態
         return res.status(201).json({
@@ -239,7 +250,7 @@ export const redirectToLongUrl = async (req: Request, res: Response) => {
         const ttl = Math.max(1, Math.ceil((expireAt.getTime() - Date.now()) / 1000));
 
         // 寫入redis
-        await redis.setEx(`short:${code}`, ttl, longUrl);
+        await redis.setEx(key, ttl, longUrl);
 
         // 302轉址
         return res.redirect(302, longUrl)

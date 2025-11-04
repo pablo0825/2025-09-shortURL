@@ -10,6 +10,7 @@ import { pool } from "./pool.js";
 import router from "./route/link.route";
 import { redirectToLongUrl } from "./controller/link.controllers";
 import { cacheShortUrl } from "./middleware/cacheShortUrl";
+import "./task/tasks"
 
 const app = express();
 
