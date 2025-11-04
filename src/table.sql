@@ -31,7 +31,7 @@
 
 -- 2025/11/04 建立link_task
 -- CREATE TYPE link_task_status AS ENUM ('pending', 'processing', 'done', 'failed');
---
+-- --
 -- CREATE TABLE link_task (
 --     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY , -- 主鍵
 --     link_id BIGINT NOT NULL REFERENCES links(id) ON DELETE CASCADE , -- 外鍵，引用自link_id
@@ -46,9 +46,9 @@
 --     last_error_at TIMESTAMPTZ, -- 最近一次錯誤的時間
 --     created_at TIMESTAMPTZ NOT NULL DEFAULT now()  -- 創建時間
 -- );
---
--- -- 建立索引
--- -- 複合式索引
+-- --
+-- -- -- 建立索引
+-- -- -- 複合式索引
 -- CREATE INDEX IF NOT EXISTS idx_link_task_available ON link_task(status, available_at);
 --
 -- -- 限制同一個link_id在pending/processing期間，只能保留一筆
@@ -57,8 +57,6 @@
 -- -- 限制payload帶的資料，且不能為空
 -- ALTER TABLE link_task ADD CONSTRAINT chk_payload_has_keys CHECK (payload ? 'code' AND payload ? 'long_url' AND payload ? 'expire_at');
 
--- UPDATE link_task SET status = 'pending' WHERE status = 'processing';
+TRUNCATE TABLE link_task;
 
--- UPDATE link_task SET status = $1, processed_at = S2 WHERE status = $3
-
-UPDATE link_task SET status = $1, last_error = $2, last_error_at = $3 WHERE status = $4 AND processed_at IS NULL
+UPDATE link_task SET status = $1, available_at = now() + make_interval(secs => LEAST(3600, 60 * (2 ^ GREATEST($2 ,1)))),last_error = $3, last_error_at = now(), locked_at = NULL, locked_by = Null WHERE id = $4 AND status = $5
