@@ -57,6 +57,4 @@
 -- -- 限制payload帶的資料，且不能為空
 -- ALTER TABLE link_task ADD CONSTRAINT chk_payload_has_keys CHECK (payload ? 'code' AND payload ? 'long_url' AND payload ? 'expire_at');
 
-TRUNCATE TABLE link_task;
 
-UPDATE link_task SET status = $1, available_at = now() + make_interval(secs => LEAST(3600, 60 * (2 ^ GREATEST($2 ,1)))),last_error = $3, last_error_at = now(), locked_at = NULL, locked_by = Null WHERE id = $4 AND status = $5

@@ -401,6 +401,8 @@ export const deleteLink = async (req: Request, res: Response) => {
     }
 }
 
+// [api] 停用link
+// [未完成] 補上停用link時，要刪掉redis中的快取紀錄
 export const deactivateLink = async (req: Request, res: Response) => {
     try {
         const id = (req.params.id ?? "").trim();
