@@ -402,7 +402,7 @@ export const deleteLink = async (req: Request, res: Response) => {
 }
 
 // [api] 停用link
-// [未完成] 補上停用link時，要刪掉redis中的快取紀錄
+// [2025/11/06完成] 補上停用link時，要刪掉redis中的快取紀錄
 export const deactivateLink = async (req: Request, res: Response) => {
     try {
         const id = (req.params.id ?? "").trim();
@@ -414,12 +414,13 @@ export const deactivateLink = async (req: Request, res: Response) => {
             })
         }
 
-        const query = await pool.query(`UPDATE links SET is_active = FALSE WHERE id = $1::BIGINT AND expire_at > now() AND is_active = TRUE;`, [id]);
+        const query = await pool.query<{ code:string }>(`UPDATE links SET is_active = FALSE WHERE id = $1::BIGINT AND expire_at > now() AND is_active = TRUE RETURNING code;`, [id]);
         // 成功更新
         if(query.rowCount === 1) {
             // 寫入log紀錄
             writeLogToDB(req, id, `${id} link停用`);
-
+            // 刪除快取
+            await redis.del(`short:${query.rows[0].code}`);
             return res.status(200).json({
                 ok: true,
                 msg: `${id} 已停用`
