@@ -57,4 +57,4 @@
 -- -- 限制payload帶的資料，且不能為空
 -- ALTER TABLE link_task ADD CONSTRAINT chk_payload_has_keys CHECK (payload ? 'code' AND payload ? 'long_url' AND payload ? 'expire_at');
 
-
+UPDATE links SET is_active = FALSE WHERE id = 20;
