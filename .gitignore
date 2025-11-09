@@ -10,3 +10,4 @@ yarn-error.log*
 config.env
 
 .vscode/*
+thoughts.md
