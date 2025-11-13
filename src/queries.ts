@@ -31,7 +31,7 @@ const otherRefreshId = "u999"; // 可用來測「id 不同」的情境
 const jwt = new jwtProvider();
 
 function main() {
-    const access = jwt.generateAccessToken(badAccess_invalidEmail);
+    const access = jwt.generateAccessToken(okAccess);
     const refresh = jwt.generateRefreshToken(otherRefreshId);
     console.log(access);
     console.log(refresh);

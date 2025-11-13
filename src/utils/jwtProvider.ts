@@ -1,3 +1,4 @@
+// jwtProvider.ts
 import jwt, { SignOptions, Secret, JwtPayload, TokenExpiredError, NotBeforeError, JsonWebTokenError } from "jsonwebtoken";
 import { AccessPayloadSchema, RefreshPayloadSchema } from "../zod/jwt.schema";
 import dotenv from 'dotenv';
