@@ -43,3 +43,47 @@ zod:
 
 ## 2025/11/13
 
+完成功能：
+1. redis驗證工具
+
+## 2025/11/14
+
+auth API：
+1. 註冊
+2. 登入
+3. 登出(單一裝置)
+4. 登出(全部裝置)
+5. 刷新 refreshToken 
+6. 忘記密碼 
+7. 重設密碼 
+8. 中介層:jwt驗證 (這邊要處理accessToken過期的情況)
+
+ps:密碼等明文，要hash過
+
+user API:
+1. 刪除帳號
+
+user table:
+
+| 名稱                     | 型別     | 用途                               |
+|------------------------|--------|----------------------------------|
+| id                     | number | 主鍵                               |
+| nickname               | string | 使用者名稱                            |
+| account                | string |                                  |
+| password_hash          | string | password用hash加密，所以這邊存的是hash(雜湊值) |
+| email                  | string | 作為帳號                             |
+| is_email_verified      | bool   | 表示email是否通過驗證                    |
+| email_verified_at      | date   | email通過驗證的時間                     |
+| avatar_url             | string | 允許NULL                           |
+| roles                  | enum   | admin, user, assistant           |
+| is_active              | bool   |                                  |
+| created_at             | date   |                                  |
+| updated_at             | date   | 更新時間                             |
+| last_login_at          | date   | 最後登入時間                           |
+| last_password_reset_at | date   | 最後更新密碼的時間                        |
+
+
+
+登入紀錄(裝置/瀏覽器, ip, 登入時間, 最後活動, 狀態:目前裝置, 非活躍)
+
+登出所有裝置

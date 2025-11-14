@@ -20,7 +20,6 @@ interface AccessClaims extends JwtPayload  {
     role?: string;
 }
 
-// [未完成] jwt工具有優化空間
 export class jwtProvider {
     // 用private(私有)限制函數存取
     // readonly 一但初始化，函數就無法修改，內外都一樣
@@ -70,7 +69,7 @@ export class jwtProvider {
         this.CLOCK_TOLERANCE_SEC = Number(clockTol);
     }
 
-    // 產生 access token
+    // [功能1] 產生 access token
     public generateAccessToken(raw: AccessClaims): string {
         // zod驗證
         const payload = AccessPayloadSchema.parse(raw);
@@ -90,7 +89,7 @@ export class jwtProvider {
         return jwt.sign(payload, this.JWT_ACCESS_SECRET, options);
     }
 
-    // 產生 refresh token
+    // [功能2] 產生 refresh token
     public generateRefreshToken(raw: string): string {
         console.log(raw);
         const id = RefreshPayloadSchema.parse(raw);
@@ -110,7 +109,7 @@ export class jwtProvider {
         return jwt.sign({id: id}, this.JWT_REFRESH_SECRET, options);
     }
 
-    // 解碼
+    // [功能3] token解碼
     public verifyToken(token: string, type: "access" | "refresh") {
         if (!token) {
             return { ok: false, reason: "invalid", msg: "[jwt]] token是必須的!" };
