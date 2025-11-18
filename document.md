@@ -57,33 +57,86 @@ auth API：
 6. 忘記密碼 
 7. 重設密碼 
 8. 中介層:jwt驗證 (這邊要處理accessToken過期的情況)
+9. 驗證email
+10. 重新發送驗證email
 
 ps:密碼等明文，要hash過
+
+可以考慮，要不要檔未驗證的email登入，像是限制部分功能不能使用
 
 user API:
 1. 刪除帳號
 
-user table:
+權限設計：
+基於角色的權限設計
+多對多
+一個使用者有多個角色，一個角色有多個權限
+
+### user table:
 
 | 名稱                     | 型別     | 用途                               |
 |------------------------|--------|----------------------------------|
-| id                     | number | 主鍵                               |
-| nickname               | string | 使用者名稱                            |
-| account                | string |                                  |
-| password_hash          | string | password用hash加密，所以這邊存的是hash(雜湊值) |
+| id                     | bigint | 主鍵                               |
 | email                  | string | 作為帳號                             |
+| password_hash          | string | password用hash加密，所以這邊存的是hash(雜湊值) |
+| nickname               | string | 使用者名稱                            |
+| provider               | string | 第三方登入                            |
+| provider_id            | string | 第三方登入                            |
 | is_email_verified      | bool   | 表示email是否通過驗證                    |
 | email_verified_at      | date   | email通過驗證的時間                     |
-| avatar_url             | string | 允許NULL                           |
-| roles                  | enum   | admin, user, assistant           |
-| is_active              | bool   |                                  |
-| created_at             | date   |                                  |
+| avatar_key             | string | 允許NULL                           |
+| is_active              | bool   | 帳號啟用                             |
+| deleted_at             | date   | 軟刪除                              |
+| created_at             | date   | 創建時間                             |
 | updated_at             | date   | 更新時間                             |
 | last_login_at          | date   | 最後登入時間                           |
 | last_password_reset_at | date   | 最後更新密碼的時間                        |
 
 
+### refresh_token table:
 
-登入紀錄(裝置/瀏覽器, ip, 登入時間, 最後活動, 狀態:目前裝置, 非活躍)
+| 欄位                 | 型別      | 用途              |
+|--------------------|---------|-----------------|
+| id                 | number  | 主鍵              |
+| user_id            | number  | 外鍵約束            |
+| refresh_token_hash | string  |                 |
+| user_agent         | string  | 紀錄裝置來源的原始資料     |
+| ip_address         |         | 當下的ip地址         |
+| created_at         | date    | 創建時間            |
+| expires_at         | date    | 過期時間            |
+| revoked_at         | date    | 強制過期時間          |
+| device_info        | string  | 整理過的裝置資料        |
+| last_used_at       | date    | 紀錄每一個裝置的最後登入時間  |
 
-登出所有裝置
+### user_role table:
+
+| 欄位      | 型別     | 用途   |
+|---------|--------|------|
+| id      | number | 主鍵   |
+| user_id | number | 約束外鍵 |
+| role_id | number | 約束外鍵 |
+
+### role table:
+
+| 欄位          | 型別     | 用途                     |
+|-------------|--------|------------------------|
+| id          | number | 主鍵                     |
+| type        | string | admin, user, assistant |
+
+### permissions table:
+
+| 欄位          | 型別     | 用途              |
+|-------------|--------|-----------------|
+| id          | number | 主鍵              |
+| resource    | string | 資源，或是說可處理的範圍    |
+| action      | string | creat, update等等 |
+| description | string | 說明可以做甚麼         |
+
+### role_permissions:
+
+| 欄位             | 型別     | 用途   |
+|----------------|--------|------|
+| id             | number | 主鍵   |
+| role_id        | number | 約束外鍵 |
+| permissions_id | number | 約束外鍵 |
+

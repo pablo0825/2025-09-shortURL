@@ -57,4 +57,39 @@
 -- -- 限制payload帶的資料，且不能為空
 -- ALTER TABLE link_task ADD CONSTRAINT chk_payload_has_keys CHECK (payload ? 'code' AND payload ? 'long_url' AND payload ? 'expire_at');
 
-UPDATE links SET is_active = FALSE WHERE id = 20;
+-- unique 唯一性，表示資料只有這一筆，例如使用者用abc email註冊，那其他使用這就不能用這個註冊。
+
+--     2025/11/18
+-- CREATE TABLE users (
+--     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY , -- 主鍵
+--     email TEXT UNIQUE NOT NULL , -- 作為帳號, 自動建立唯一索引
+--     password_hash TEXT NOT NULL , -- 密碼，不能用明文
+--     nickname TEXT NOT NULL , -- 使用者名稱
+--     -- 第三方登入
+--     provider TEXT DEFAULT 'local',
+--     provider_id TEXT,
+--     --
+--     is_email_verified BOOLEAN NOT NULL DEFAULT FALSE , -- email是否通過驗證
+--     email_verified_at TIMESTAMPTZ , -- email通過驗證的時間
+--     avatar_key TEXT ,  -- 使用者頭像
+--     is_active BOOLEAN NOT NULL DEFAULT TRUE , -- 帳號是否啟用
+--     deleted_at TIMESTAMPTZ , -- 軟刪除
+--     created_at TIMESTAMPTZ NOT NULL DEFAULT now() , -- 創建時間
+--     updated_at TIMESTAMPTZ NOT NULL DEFAULT now() , -- 更新時間，如使用者名稱、頭像等
+--     last_login_at TIMESTAMPTZ , -- 最後登入時間
+--     last_password_reset_at TIMESTAMPTZ  -- 最後更新密碼的時間
+-- );
+
+-- CREATE TABLE refresh_token (
+--     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY , -- 主鍵
+--     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE , -- 外鍵
+--     refresh_token_hash TEXT UNIQUE NOT NULL , -- 加入索引
+--     user_agent TEXT , -- 裝置來源的原始資料
+--     ip_address INET ,  -- 裝置ip
+--     created_at TIMESTAMPTZ NOT NULL DEFAULT now() ,
+--     expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '7 days') , -- 7天過期時間
+--     revoked_at TIMESTAMP , -- 強制過期時間
+--     device_info TEXT , -- 裝置資料
+--     last_used_at TIMESTAMPTZ , -- 最後登入的時間
+--     CHECK ( expires_at >= created_at ) -- 過期時間必須大於創建時間
+-- );

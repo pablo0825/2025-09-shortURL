@@ -1,6 +1,6 @@
 import cron from "node-cron";
 import {pool} from "../pool";
-import {linkTasksToCheckTask} from "./linkTasksToCheck.task";
+import {linkTasksToCacheTask} from "./linkTasksToCacheTask";
 import redis from "../redis/redisClient";
 import {deleteCheckForDisabledLinks} from "./deleteCheckForDisabledLinks.task";
 
@@ -33,7 +33,7 @@ cron.schedule("*/30 * * * *", async () => {
 cron.schedule("*/10 * * * *", async () => {
     try {
         console.log(`[CRON-03] 運行link寫入check的任務...`);
-        await linkTasksToCheckTask();
+        await linkTasksToCacheTask();
     } catch (err) {
         console.error("[CRON-03] link寫入check失敗:", err);
     }

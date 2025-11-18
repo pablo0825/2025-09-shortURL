@@ -1,5 +1,5 @@
 
-// linkTasksToCheckTask.task.ts
+// linkTasksToCacheTask.task.ts
 import {pool} from "../pool";
 import redis from "../redis/redisClient";
 import type { PoolClient } from "pg";
@@ -25,7 +25,7 @@ function computeTtlSeconds(expireAt: string | null): number | null {
     return sec;
 }
 
-export async function linkTasksToCheckTask() {
+export async function linkTasksToCacheTask() {
     // 從pool中獲取一個獨立且連續的資料庫連線
     client = await pool.connect();
 
