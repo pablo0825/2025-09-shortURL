@@ -77,6 +77,7 @@ export class jwtProvider {
             // SignOptions["expiresIn"]表示的型別為string | number
             // 告訴編譯器說，我知道JWT_ACCESS_EXPIRATION是string，但相信我，這個字的值裡面有"1h"
             // 加入發行人, 接收人, 偏差容忍時間等參數
+            // 例子，exp:1763540100
             expiresIn: this.JWT_ACCESS_EXPIRES_IN as SignOptions["expiresIn"],
             algorithm: "HS256",
             issuer: this.ISSUER,

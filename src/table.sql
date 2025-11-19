@@ -93,3 +93,26 @@
 --     last_used_at TIMESTAMPTZ , -- 最後登入的時間
 --     CHECK ( expires_at >= created_at ) -- 過期時間必須大於創建時間
 -- );
+
+-- 2025/11/19
+-- 加這個是為了避免，同時有複數使用者用相同的email或nickname註冊帳號，可以通過unique的唯一性把這個可能檔下來
+-- ALTER TABLE users ADD CONSTRAINT users_nickname_uk UNIQUE (nickname);
+-- ALTER TABLE users ADD CONSTRAINT  users_email_uk UNIQUE  (email);
+
+-- ALTER TABLE refresh_token ALTER COLUMN expires_at DROP NOT NULL;
+
+-- CREATE TYPE role_type AS ENUM ('admin', 'user', 'assistant');
+--
+-- CREATE TABLE role (
+--     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY , -- 主鍵
+--     type role_type NOT NULL DEFAULT 'user' --
+-- );
+
+--     link_id BIGINT NOT NULL REFERENCES links(id) ON DELETE CASCADE , -- 外鍵，引用自link_id
+
+-- CREATE TABLE user_role (
+--     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY , -- 主鍵
+--     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE , -- 外鍵
+--     role_id BIGINT NOT NULL REFERENCES role(id) ON DELETE CASCADE  -- 外鍵
+-- );
+

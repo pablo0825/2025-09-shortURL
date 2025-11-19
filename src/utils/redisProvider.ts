@@ -11,6 +11,7 @@ export class redisProvider {
     private hashToken(token: string): string {
         // .createHash("sha256") 建立一個hash，用sha256演算法
         // .digest("hex") 計算最終的雜奏值，用16進制的結果返回
+        // 這邊的加密方式是適合的，因為refreshToken的字串長度本來就很長，所以經過加密後的字串，就會更難破解
         return crypto.createHash("sha256").update(token).digest("hex");
     }
 
