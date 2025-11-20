@@ -13,7 +13,7 @@ const jwtAuthTool = new jwtProvider();
 const redisAuthTool = new redisProvider();
 
 // [api] 註冊功能
-// [未完成]
+// 把email, password, nickname等資料存到user table中，建立使用者帳號，同時將user_id和role_id存到user_role table中，將使用者帳號與角色進行關聯，預設的角色是user
 // 高併發: 在同一個時間下，有複數使用者用相同的email或nickname，會觸發unique唯一性的問題，然後會返回23505
 export const register = async (req: Request, res: Response) => {
     // parse和safeParse的差別在於，是否信任資料來源
@@ -33,35 +33,34 @@ export const register = async (req: Request, res: Response) => {
         });
     }
     const {email, nickname, password} = result.data;
-    // 從pool中獲取一個獨立且連續的資料庫連線
-    const client = await pool.connect();
+    //
+    let client: PoolClient | undefined;
     try {
-        // 檢查user table中的email是否有相同資料
-        const emailExists = await pool.query<{email:string}>('SELECT email FROM users WHERE email = $1', [email]);
-        if (emailExists.rowCount !== 0) {
-            return res.status(409).json({
-                ok: false,
-                error: "Email 已經被註冊過!",
-            })
-        }
-        // 檢查user table中的nickname是否有相同資料
-        const nicknameExists = await pool.query<{nickname:string}>('SELECT nickname FROM users WHERE nickname = $1', [nickname]);
-        if (nicknameExists.rowCount !== 0) {
-            return res.status(409).json({
-                ok: false,
-                error: "暱稱已經被使用!"
-            })
-        }
         // 使用 bcrypt 產生密碼雜湊（約 60 字元長度）
         // 這邊不用sha-256雜湊的原因是，password通常比較短、好猜，所以要改用bcrypt加密
         // bcrypt計算速度較慢，因為要把password變成不好猜中的密文
         const passwordHash:string = await bcrypt.hash(password, 10);
-        // [] 開始交易
-        await client.query('BEGIN');
-        // 把email, password, nickname等資料存到user table
-        const user = await client.query<{id:number, email:string, nickname:string}>('INSERT INTO users(email, password_hash, nickname) VALUES ($1, $2, $3) RETURNING id, email, nickname', [email, passwordHash, nickname]);
-
+        // 從pool中獲取一個獨立且連續的資料庫連線
+        client = await pool.connect();
+        // email, nickname的檢查，由資料庫負責，通過unique的唯一性
+        // // 檢查user table中的email是否有相同資料
+        // const emailExists = await client.query<{email:string}>('SELECT email FROM users WHERE email = $1', [email]);
+        // if (emailExists.rowCount !== 0) {
+        //     return res.status(409).json({
+        //         ok: false,
+        //         error: "Email 已經被註冊過!",
+        //     })
+        // }
+        // // 檢查user table中的nickname是否有相同資料
+        // const nicknameExists = await client.query<{nickname:string}>('SELECT nickname FROM users WHERE nickname = $1', [nickname]);
+        // if (nicknameExists.rowCount !== 0) {
+        //     return res.status(409).json({
+        //         ok: false,
+        //         error: "暱稱已經被使用!"
+        //     })
+        // }
         // 預設角色是user，所以這邊就是查user的id
+        // [標註] 優化點: 可以把role的資料，寫入到redis中。這我覺得可以，之後來優化
         const role = await client.query<{id:number}>('SELECT id FROM role WHERE type = $1', ['user']);
         if (role.rowCount === 0) {
             return res.status(409).json({
@@ -69,6 +68,11 @@ export const register = async (req: Request, res: Response) => {
                 error: "角色 user 尚未在role table建立"
             })
         }
+        // [] 開始交易
+        // 交易的特性是，如果過程失敗了，就直接結束
+        await client.query('BEGIN');
+        // 把email, password, nickname等資料存到user table
+        const user = await client.query<{id:number, email:string, nickname:string}>('INSERT INTO users(email, password_hash, nickname) VALUES ($1, $2, $3) RETURNING id, email, nickname', [email, passwordHash, nickname]);
         const userId:number = user.rows[0].id;
         const roleId:number = role.rows[0].id;
         // 把user_id, role_id存到user_role table
@@ -162,6 +166,19 @@ export const login = async (req: Request, res: Response) => {
             error: "密碼錯誤，請重新輸入密碼"
         })
     }
+    // 要開始創建accessToken, refreshToken
+    // 需要知道使用者的角色，也就是拿到tole的type
+    // user_role table, role table
+    const userRole = await pool.query<{type:string}>('SELECT r.type FROM role r JOIN user_role ur ON r.id = ur.role_id WHERE ur.user_id = $1', [id]);
+    if (userRole.rowCount === 0) {
+        return res.status(401).json({
+            ok: false,
+            error: `找不到${nickname}使用者的角色身分`
+        })
+    }
+    const userRoleType:string = userRole.rows[0].type;
+
+
 
     // 更新登入時間
 }
