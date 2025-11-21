@@ -87,7 +87,7 @@
 --     user_agent TEXT , -- 裝置來源的原始資料
 --     ip_address INET ,  -- 裝置ip
 --     created_at TIMESTAMPTZ NOT NULL DEFAULT now() ,
---     expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '7 days') , -- 7天過期時間
+--     expires_at TIMESTAMPTZ NOT NULL  , -- 過期時間
 --     revoked_at TIMESTAMP , -- 強制過期時間
 --     device_info TEXT , -- 裝置資料
 --     last_used_at TIMESTAMPTZ , -- 最後登入的時間

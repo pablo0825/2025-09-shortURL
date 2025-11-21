@@ -126,59 +126,113 @@ export const register = async (req: Request, res: Response) => {
 }
 
 // [api] 登入功能
-// [未完成]
 export const login = async (req: Request, res: Response) => {
     // 把res.body解包，送進去loginSchema檢查，有沒有符合規範
-    // 用email作為key，到users查詢該名使用者的資料。true，回傳資料包; false，回傳失敗原因
-    // 拿到資料包後，把資料包中的passwordHash，拿去跟password進行比較。ture，往下執行; false，回傳失敗原因
-    // 用jwt製作accessToken, refreshToken
-    // 用jwt解碼refreshToken，把refreshToken中的exp，拿去計算過期時間(標註:我覺得這邊會跟db的過期時間撞到)
-    // 把refreshToken存到refresh_toke table中
-    // 用rowCount檢查是否錯誤
-    // 把refreshToken存到cookie
-    // 回傳登入成功的資訊
     const result = loginSchema.safeParse(req.body);
     if (!result.success) {
-        const message = result.error.issues[0]?.message ?? "無效的登入資料"
-        return res.status(401).json({
+        const message = result.error.issues[0]?.message ?? "無效的登入資料";
+        // 400 請求內容不正確
+        return res.status(400).json({
             ok: false,
             error: message
         })
     }
     const {email, password} = result.data;
     //
-    const user = await pool.query('SELECT id, email, password_hash, nickname FROM users WHERE email = $1 AND is_active = TRUE', [email]);
-    // 檢查user是否存在
-    if (user.rowCount === 0) {
-        return res.status(401).json({
+    let expiresAt;
+    let tokenMaxAge = 7 * 24 * 60 * 60 * 1000; // 預設 7 天（毫秒）
+    try {
+        // 查user
+        const user = await pool.query('SELECT id, email, password_hash, nickname FROM users WHERE email = $1 AND is_active = TRUE', [email]);
+        // 檢查user是否存在
+        if (user.rowCount === 0) {
+            return res.status(401).json({
+                ok: false,
+                error: `帳號不存在，請重新輸入帳號`
+            })
+        }
+        // 把user的資料解包出來
+        const {id, password_hash, nickname, email: userEmail } = user.rows[0];
+        // 比對密碼
+        const passwordCheck:boolean = await bcrypt.compare(password, password_hash);
+        if (!passwordCheck) {
+            return res.status(401).json({
+                ok: false,
+                error: "密碼錯誤，請重新輸入密碼"
+            })
+        }
+        // 取得user的role
+        const userRole = await pool.query<{type:string}>('SELECT r.type FROM role r JOIN user_role ur ON r.id = ur.role_id WHERE ur.user_id = $1', [id]);
+        // 檢查user的role是否有設定
+        if (userRole.rowCount === 0) {
+            console.error(`[auth/login] user ${id} 找不到角色`);
+            return res.status(401).json({
+                ok: false,
+                error: "系統錯誤，請稍後再試"
+            })
+        }
+        // 拿出user的role_type
+        const userRoleType:string = userRole.rows[0].type;
+        // 發行jwt
+        const accessToken = jwtAuthTool.generateAccessToken({
+            id:id, name:nickname, email:userEmail, role:userRoleType
+        });
+        const refreshToken = jwtAuthTool.generateRefreshToken(id);
+        // 把refreshToken加密
+        const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
+        // 解析refreshToken的exp
+        const decode = jwtAuthTool.verifyToken(refreshToken, "refresh");
+        const exp = decode.claims?.exp;
+        //
+        if (typeof exp === "number") {
+            expiresAt = new Date(exp * 1000).toUTCString();
+            //
+            tokenMaxAge = exp * 1000 - Date.now();
+        } else {
+            console.error("[api:auth/login] 無法解析refreshToken中的exp", decode);
+            return res.status(500).json({
+                ok: false,
+                error: "登入流程錯誤，請稍後再試",
+            })
+        }
+        // 準備設備資料
+        const userAgent = req.get("user-agent") ?? null;
+        // [標註] 這個ip取得法，好像會有問題，但先暫時這樣
+        const userIp = req.ip;
+        const lastUsedAt = new Date();
+        // [標註] 要了解user_agent的資料
+        console.log(userAgent);
+        // [標註] 清理過期的refreshToken(有需要在登入做這件事情嗎?感覺做成背景任務更好)
+        await pool.query('DELETE FROM refresh_token WHERE user_id = $1 AND expires_at < now()', [id]);
+        // 把refreshTokenHash存到refresh_token table中
+        await pool.query('INSERT INTO refresh_token(user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at) VALUES ($1, $2, $3, $4, $5, $6, $7)', [id, refreshTokenHash, userAgent, userIp, expiresAt, "", lastUsedAt]);
+        // 更新最後登入時間
+        await pool.query('UPDATE users SET last_login_at = $1 WHERE id = $2', [lastUsedAt, id]);
+        // 8) 設置 cookie
+        res.cookie("refreshToken", refreshToken, {
+            httpOnly: true, // 防止XSS攻擊
+            secure: process.env.NODE_ENV === "production",
+            maxAge: tokenMaxAge, // token過期時間
+            sameSite: "lax", // 防止CSRF攻擊
+            path: "/",
+        });
+        return res.status(200).json({
+            ok: true,
+            message: `${nickname} 使用者登入成功`,
+            accessToken,
+            user: {
+                id:id,
+                email: userEmail,
+                name:nickname,
+                role: userRoleType,
+            },
+        });
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[api:auth/login] error:", msg, err);
+        return res.status(500).json({
             ok: false,
-            error: `${email} 帳號不存在，請重新輸入帳號`
-        })
+            error: "伺服器內部錯誤，登入失敗，請稍後再試",
+        });
     }
-    // 把user的資料解包出來
-    const {id, password_hash, nickname } = user.rows[0];
-    const userEmail:string = user.rows[0].email;
-    // password跟password_hash進行比較，確認雜湊值是否相同
-    const passwordCheck:boolean = await bcrypt.compare(password, password_hash);
-    if (!passwordCheck) {
-        return res.status(401).json({
-            ok: false,
-            error: "密碼錯誤，請重新輸入密碼"
-        })
-    }
-    // 要開始創建accessToken, refreshToken
-    // 需要知道使用者的角色，也就是拿到tole的type
-    // user_role table, role table
-    const userRole = await pool.query<{type:string}>('SELECT r.type FROM role r JOIN user_role ur ON r.id = ur.role_id WHERE ur.user_id = $1', [id]);
-    if (userRole.rowCount === 0) {
-        return res.status(401).json({
-            ok: false,
-            error: `找不到${nickname}使用者的角色身分`
-        })
-    }
-    const userRoleType:string = userRole.rows[0].type;
-
-
-
-    // 更新登入時間
 }

@@ -49,4 +49,6 @@ function main() {
     console.log("[verify refresh]", v3);
 }
 
-main();
+// main();
+
+console.log(Date.now());
