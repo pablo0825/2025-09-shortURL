@@ -56,9 +56,12 @@ auth API：
 5. 刷新 refreshToken 
 6. 忘記密碼 
 7. 重設密碼 
-8. 中介層:jwt驗證 (這邊要處理accessToken過期的情況)
-9. 驗證email
-10. 重新發送驗證email
+8. 驗證email 
+9. 重新發送驗證email
+
+auth 中介層:
+1. 雙token驗證(這邊要處理accessToken過期的情況)
+2. 權限管理
 
 ps:密碼等明文，要hash過
 

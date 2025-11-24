@@ -7,7 +7,7 @@ import {jwtProvider} from "../utils/jwtProvider";
 import {redisProvider} from "../utils/redisProvider";
 import {registerSchema, loginSchema} from "../zod/auth.schema";
 import * as crypto from "node:crypto";
-import * as bcrypt from "bcrypt-ts";
+import bcrypt from "bcrypt";
 
 const jwtAuthTool = new jwtProvider();
 const redisAuthTool = new redisProvider();
@@ -201,7 +201,7 @@ export const login = async (req: Request, res: Response) => {
         const userIp = req.ip;
         const lastUsedAt = new Date();
         // [標註] 要了解user_agent的資料
-        console.log(userAgent);
+        // console.log(userAgent);
         // [標註] 清理過期的refreshToken(有需要在登入做這件事情嗎?感覺做成背景任務更好)
         await pool.query('DELETE FROM refresh_token WHERE user_id = $1 AND expires_at < now()', [id]);
         // 把refreshTokenHash存到refresh_token table中

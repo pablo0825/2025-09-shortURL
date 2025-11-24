@@ -7,7 +7,7 @@ yarn-debug.log*
 yarn-error.log*
 /.pnp
 .pnp.js
-config.env
+.env
 
 .vscode/*
 thoughts.md

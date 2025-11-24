@@ -1,24 +1,27 @@
 // index.ts
 // import dotenv from 'dotenv';
-// dotenv.config({ path: '../config.env' });
+// dotenv.config({ path: '../.env' });
 // 引入插件
 import express from 'express';
 // import path from 'path';
 import type { Request, Response, NextFunction } from 'express';
 // 引入變數
-import { pool } from "./pool.js";
+import { pool } from "./pool";
 import router from "./route/link.route";
+import authRoute from "./route/auth.route";
 import { redirectToLongUrl } from "./controller/link.controllers";
 import { cacheShortUrl } from "./middleware/cacheShortUrl";
-import "./task/tasks"
+// import "./task/tasks"
 
 const app = express();
 
 app.use(express.json());
 
 const port = Number(process.env.PORT ?? 3001);
+// console.log(process.env.PORT);
 
 app.use("/api/link", router);
+app.use("/api/auth", authRoute);
 //
 app.get("/health", async (_req:Request, res:Response) => {
     try {

@@ -1,6 +1,6 @@
 import { jwtProvider } from "./utils/jwtProvider";
 import dotenv from 'dotenv';
-dotenv.config({ path: '../config.env' });
+dotenv.config({ path: '../.env' });
 
 // ✅ 合法 AccessClaims
 const okAccess: any = {

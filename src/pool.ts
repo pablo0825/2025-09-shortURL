@@ -1,7 +1,13 @@
 // pool.ts
 import dotenv from 'dotenv';
-dotenv.config({ path: '../config.env' });
+dotenv.config({path: ".env"});
 import pg from 'pg';
+
+// console.log(process.env.DATABASE_HOST);
+// console.log(process.env.DATABASE_URL);
+// console.log(process.env.DATABASE_NAME);
+// console.log(process.env.DATABASE_USERNAME);
+// console.log(process.env.DATABASE_HOST);
 
 // 檢查環境變數是否有設定
 if (

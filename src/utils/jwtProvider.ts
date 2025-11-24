@@ -2,7 +2,7 @@
 import jwt, { SignOptions, Secret, JwtPayload, TokenExpiredError, NotBeforeError, JsonWebTokenError } from "jsonwebtoken";
 import { AccessPayloadSchema, RefreshPayloadSchema } from "../zod/jwt.schema";
 import dotenv from 'dotenv';
-dotenv.config({ path: '../config.env' });
+dotenv.config({ path: '../.env' });
 
 // 在原本的id, name, email, role等型別上，加上JwtPayload對型別的限制
 // jwt的型別限制
