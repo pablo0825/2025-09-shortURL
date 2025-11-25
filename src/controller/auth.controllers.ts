@@ -236,3 +236,32 @@ export const login = async (req: Request, res: Response) => {
         });
     }
 }
+
+// [api] 刷新token
+// 採用refresh token rotation
+export const refresh = async (req:Request, res:Response) => {
+    // 從cookie中，把refreshToken拿出來
+    // 檢查refreshToken是否存在
+    // 存在，往下執行; 不存在，return refreshToken不存在，請先登入
+    // 把refreshToken，hash一下
+    // 把hash後的refreshToken作為key，拿去查refresh_token table
+    // 條件是(1)token不能過期 (2)token的強制中止時間為NULL
+    // 預期返回user_id
+    // 檢查refresh_token table的查詢結果是否存在
+    // 存在，往下執行; 不存在，return refreshToken已經過期，請重新登入
+    // 把refreshToken解碼，解出id
+    // 從refresh_token table的回傳結果中，解出user_id
+    // 比較id和user_id是否相同
+    // 相同，往下執行; 不相同，id不同，請重新登入
+    // 更新refresh token table中的revoked_at的date為now (同於把這個refreshToken作廢了)
+    // 用id去查使用者資料，如:id, email, nickname
+    // 檢查user是否存在
+    // 存在，往下執行; 不存在，回傳使用者不存在
+    // 用id去查role
+    // 檢查角色是否存在
+    // 存在，往下執行; 不存在，回傳角色設定有問題
+    // 產生新的accessToken和refreshToken
+    // 把newRefreshToken更新到refresh token table中
+    // 把new refresh token設定到cookie中，也要把old refreshToken清除
+    // 把相關資訊回傳前端
+}
