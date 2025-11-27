@@ -8,6 +8,7 @@ import {redisProvider} from "../utils/redisProvider";
 import {registerSchema, loginSchema} from "../zod/auth.schema";
 import * as crypto from "node:crypto";
 import bcrypt from "bcrypt";
+import {id} from "zod/locales";
 
 const jwtAuthTool = new jwtProvider();
 const redisAuthTool = new redisProvider();
@@ -16,6 +17,9 @@ const redisAuthTool = new redisProvider();
 // 把email, password, nickname等資料存到user table中，建立使用者帳號，同時將user_id和role_id存到user_role table中，將使用者帳號與角色進行關聯，預設的角色是user
 // 高併發: 在同一個時間下，有複數使用者用相同的email或nickname，會觸發unique唯一性的問題，然後會返回23505
 export const register = async (req: Request, res: Response) => {
+    // 變數區
+    let client: PoolClient | undefined;
+
     // parse和safeParse的差別在於，是否信任資料來源
     // 信任的話，用parse; 不信任的話，用safeParse
     // parse，資料有效，就回傳驗證後的資烙; 資料無效，就拋出zodError
@@ -32,16 +36,18 @@ export const register = async (req: Request, res: Response) => {
             error: msg,
         });
     }
+
     const {email, nickname, password} = result.data;
-    //
-    let client: PoolClient | undefined;
+
     try {
         // 使用 bcrypt 產生密碼雜湊（約 60 字元長度）
         // 這邊不用sha-256雜湊的原因是，password通常比較短、好猜，所以要改用bcrypt加密
         // bcrypt計算速度較慢，因為要把password變成不好猜中的密文
         const passwordHash:string = await bcrypt.hash(password, 10);
+
         // 從pool中獲取一個獨立且連續的資料庫連線
         client = await pool.connect();
+
         // email, nickname的檢查，由資料庫負責，通過unique的唯一性
         // // 檢查user table中的email是否有相同資料
         // const emailExists = await client.query<{email:string}>('SELECT email FROM users WHERE email = $1', [email]);
@@ -68,17 +74,21 @@ export const register = async (req: Request, res: Response) => {
                 error: "角色 user 尚未在role table建立"
             })
         }
-        // [] 開始交易
+        // [交易] 開始
         // 交易的特性是，如果過程失敗了，就直接結束
         await client.query('BEGIN');
+
         // 把email, password, nickname等資料存到user table
         const user = await client.query<{id:number, email:string, nickname:string}>('INSERT INTO users(email, password_hash, nickname) VALUES ($1, $2, $3) RETURNING id, email, nickname', [email, passwordHash, nickname]);
+
         const userId:number = user.rows[0].id;
         const roleId:number = role.rows[0].id;
+
         // 把user_id, role_id存到user_role table
         // 不需要接回傳值，可以直接這樣寫
         await client.query('INSERT INTO user_role(user_id, role_id) VALUES ($1, $2)', [userId, roleId]);
-        // [] 交易結束
+
+        // [交易] 成功，結束
         await client.query('COMMIT')
 
         // 200 表示請求成功
@@ -95,9 +105,11 @@ export const register = async (req: Request, res: Response) => {
             // 如果沒有包的話，會停留在catch上
             // 這樣就不能釋放pool的連線資源
             try {
+                // [交易] 失敗，返回
                 await client.query('ROLLBACK');
             } catch {}
         }
+
         // 違反唯一鍵，會返回23505
         if (err && err.code === "23505") {
             // 通過constraint名稱決定是哪一種錯誤
@@ -110,6 +122,7 @@ export const register = async (req: Request, res: Response) => {
             }
             return res.status(409).json({ ok: false, error: "使用者資料已存在，請勿重複註冊!" });
         }
+
         // 把error轉成string
         const msg = err instanceof Error ? err.message : String(err);
         // 回傳錯誤訊息給伺服器
@@ -126,7 +139,12 @@ export const register = async (req: Request, res: Response) => {
 }
 
 // [api] 登入功能
+// [問題] 我可以重複登入，這個問題怎麼解決?
 export const login = async (req: Request, res: Response) => {
+    // 變數區
+    let client: PoolClient | undefined;
+    let expiresAt;
+    let tokenMaxAge = 7 * 24 * 60 * 60 * 1000; // 預設 7 天（毫秒）
     // 把res.body解包，送進去loginSchema檢查，有沒有符合規範
     const result = loginSchema.safeParse(req.body);
     if (!result.success) {
@@ -137,77 +155,95 @@ export const login = async (req: Request, res: Response) => {
             error: message
         })
     }
+
     const {email, password} = result.data;
-    //
-    let expiresAt;
-    let tokenMaxAge = 7 * 24 * 60 * 60 * 1000; // 預設 7 天（毫秒）
+
+    // 獲取連線資源
+    client = await pool.connect();
+
     try {
         // 查user
-        const user = await pool.query('SELECT id, email, password_hash, nickname FROM users WHERE email = $1 AND is_active = TRUE', [email]);
-        // 檢查user是否存在
+        const user = await client.query<{id:number, email:string, password_hash:string, nickname:string}>('SELECT id, email, password_hash, nickname FROM users WHERE email = $1 AND is_active = TRUE', [email]);
         if (user.rowCount === 0) {
             return res.status(401).json({
                 ok: false,
-                error: `帳號不存在，請重新輸入帳號`
+                error: `帳號或密碼錯誤，請重新輸入`
             })
         }
+
         // 把user的資料解包出來
         const {id, password_hash, nickname, email: userEmail } = user.rows[0];
+
         // 比對密碼
         const passwordCheck:boolean = await bcrypt.compare(password, password_hash);
         if (!passwordCheck) {
             return res.status(401).json({
                 ok: false,
-                error: "密碼錯誤，請重新輸入密碼"
+                error: "帳號或密碼錯誤，請重新輸入"
             })
         }
+
         // 取得user的role
-        const userRole = await pool.query<{type:string}>('SELECT r.type FROM role r JOIN user_role ur ON r.id = ur.role_id WHERE ur.user_id = $1', [id]);
-        // 檢查user的role是否有設定
+        const userRole = await client.query<{type:string}>('SELECT r.type FROM role r JOIN user_role ur ON r.id = ur.role_id WHERE ur.user_id = $1', [id]);
         if (userRole.rowCount === 0) {
             console.error(`[auth/login] user ${id} 找不到角色`);
-            return res.status(401).json({
+            // 用500，這比較像是系統錯誤
+            return res.status(500).json({
                 ok: false,
                 error: "系統錯誤，請稍後再試"
             })
         }
+
         // 拿出user的role_type
         const userRoleType:string = userRole.rows[0].type;
-        // 發行jwt
+
+        // 發行access token, refresh token
         const accessToken = jwtAuthTool.generateAccessToken({
-            id:id, name:nickname, email:userEmail, role:userRoleType
+            id:id.toString(), name:nickname, email:userEmail, role:userRoleType
         });
-        const refreshToken = jwtAuthTool.generateRefreshToken(id);
+        const refreshToken = jwtAuthTool.generateRefreshToken(id.toString());
+
         // 把refreshToken加密
         const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
-        // 解析refreshToken的exp
-        const decode = jwtAuthTool.verifyToken(refreshToken, "refresh");
-        const exp = decode.claims?.exp;
-        //
-        if (typeof exp === "number") {
-            expiresAt = new Date(exp * 1000).toUTCString();
-            //
-            tokenMaxAge = exp * 1000 - Date.now();
-        } else {
-            console.error("[api:auth/login] 無法解析refreshToken中的exp", decode);
+
+        // 解析新 token 的過期時間
+        try {
+            const decode = jwtAuthTool.verifyToken(refreshToken, "refresh");
+            const exp = decode.claims?.exp;
+
+            if (typeof exp === "number") {
+                expiresAt = new Date(exp * 1000);
+                const ttlMs = exp * 1000 - Date.now();
+                // 有個寶底，確保不為負數
+                tokenMaxAge = Math.max(0, ttlMs);
+            } else {
+                throw new Error("無法解析 exp");
+            }
+        } catch (err) {
+            console.error("[api:auth/refresh] 無法解析新 token 的過期時間:", err);
             return res.status(500).json({
                 ok: false,
-                error: "登入流程錯誤，請稍後再試",
-            })
+                error: "系統錯誤，請稍後再試"
+            });
         }
+
         // 準備設備資料
         const userAgent = req.get("user-agent") ?? null;
-        // [標註] 這個ip取得法，好像會有問題，但先暫時這樣
-        const userIp = req.ip;
+        const userIp = req.ip; // [標註] 這種寫法可能會有問題，但先這樣
         const lastUsedAt = new Date();
-        // [標註] 要了解user_agent的資料
-        // console.log(userAgent);
-        // [標註] 清理過期的refreshToken(有需要在登入做這件事情嗎?感覺做成背景任務更好)
-        await pool.query('DELETE FROM refresh_token WHERE user_id = $1 AND expires_at < now()', [id]);
+
+        // [交易] 開始
+        await client.query('BEGIN')
+
         // 把refreshTokenHash存到refresh_token table中
-        await pool.query('INSERT INTO refresh_token(user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at) VALUES ($1, $2, $3, $4, $5, $6, $7)', [id, refreshTokenHash, userAgent, userIp, expiresAt, "", lastUsedAt]);
+        await client.query('INSERT INTO refresh_token(user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at) VALUES ($1, $2, $3, $4, $5, $6, $7)', [id, refreshTokenHash, userAgent, userIp, expiresAt, "", lastUsedAt]);
+
         // 更新最後登入時間
-        await pool.query('UPDATE users SET last_login_at = $1 WHERE id = $2', [lastUsedAt, id]);
+        await client.query('UPDATE users SET last_login_at = $1 WHERE id = $2', [lastUsedAt, id]);
+
+        // [交易] 成功，結束
+        await client.query('COMMIT');
+
         // 8) 設置 cookie
         res.cookie("refreshToken", refreshToken, {
             httpOnly: true, // 防止XSS攻擊
@@ -216,6 +252,7 @@ export const login = async (req: Request, res: Response) => {
             sameSite: "lax", // 防止CSRF攻擊
             path: "/",
         });
+
         return res.status(200).json({
             ok: true,
             message: `${nickname} 使用者登入成功`,
@@ -228,40 +265,233 @@ export const login = async (req: Request, res: Response) => {
             },
         });
     } catch (err) {
+        if (client) {
+            // 多包一層 try catch 是為了讓 finally 可以被執行
+            // 如果沒有包的話，會停留在 catch 上
+            // 這樣就不能釋放 pool 的連線資源
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackErr) {
+                console.error("[api:auth/refresh] ROLLBACK 失敗:", rollbackErr);
+            }
+        }
+
         const msg = err instanceof Error ? err.message : String(err);
         console.error("[api:auth/login] error:", msg, err);
         return res.status(500).json({
             ok: false,
             error: "伺服器內部錯誤，登入失敗，請稍後再試",
         });
+    } finally {
+        // [交易] 結束後，釋放連線資源
+        if (client) client.release();
     }
 }
 
 // [api] 刷新token
 // 採用refresh token rotation
 export const refresh = async (req:Request, res:Response) => {
-    // 從cookie中，把refreshToken拿出來
-    // 檢查refreshToken是否存在
-    // 存在，往下執行; 不存在，return refreshToken不存在，請先登入
-    // 把refreshToken，hash一下
-    // 把hash後的refreshToken作為key，拿去查refresh_token table
-    // 條件是(1)token不能過期 (2)token的強制中止時間為NULL
-    // 預期返回user_id
-    // 檢查refresh_token table的查詢結果是否存在
-    // 存在，往下執行; 不存在，return refreshToken已經過期，請重新登入
-    // 把refreshToken解碼，解出id
-    // 從refresh_token table的回傳結果中，解出user_id
-    // 比較id和user_id是否相同
-    // 相同，往下執行; 不相同，id不同，請重新登入
-    // 更新refresh token table中的revoked_at的date為now (同於把這個refreshToken作廢了)
-    // 用id去查使用者資料，如:id, email, nickname
-    // 檢查user是否存在
-    // 存在，往下執行; 不存在，回傳使用者不存在
-    // 用id去查role
-    // 檢查角色是否存在
-    // 存在，往下執行; 不存在，回傳角色設定有問題
-    // 產生新的accessToken和refreshToken
-    // 把newRefreshToken更新到refresh token table中
-    // 把new refresh token設定到cookie中，也要把old refreshToken清除
-    // 把相關資訊回傳前端
+    // 變數區
+    let client: PoolClient | undefined;
+    let userId:number | null = null;
+    let matchedToken: {id:number, refresh_token_hash:string} | null = null;
+    let expiresAt: Date | undefined;
+    let tokenMaxAge = 7 * 24 * 60 * 60 * 1000; // 預設 7 天（毫秒）
+
+    // 標準寫法，回傳的cookie長cookie：{ name: "refreshToken", value: "xyz123abc" }
+    const refreshToken:string = req.cookies?.refreshToken;
+    if (!refreshToken) {
+        return res.status(401).json({
+            ok: false,
+            error: "未提供 Refresh Token，請重新登入"
+        });
+    }
+
+    // 驗證jwt，並取得user_id
+    try {
+        const decode = jwtAuthTool.verifyToken(refreshToken, "refresh");
+        const id = decode.claims?.id;
+
+        // 檢查user_id是否存在
+        if (!id || isNaN(Number(id))) {
+            throw new Error("Token 中缺少 user_id");
+        }
+
+        userId = Number(id);
+    } catch (err) {
+        console.error("[api:auth/refresh] JWT 驗證失敗:", err);
+        // 刪除cookie中的refreshToken紀錄
+        res.clearCookie("refreshToken");
+        return res.status(401).json({
+            ok: false,
+            error: "Refresh Token 無效，請重新登入"
+        });
+    }
+
+    // 獲取連線資源
+    client = await pool.connect();
+
+    try {
+        // [交易] 開始
+        // 有關聯性的交易，全部需要綁在一起
+        // 一起成功，或是一起失敗
+        await client.query('BEGIN');
+
+        // 取得refresh token table中的refresh_token_hash
+        // 多裝置登入的情況下，會有多筆相同的userId存在，所以需要逐一比對
+        const storedRefreshToken = await client.query<{id:number, refresh_token_hash:string}>('SELECT id, refresh_token_hash FROM refresh_token WHERE user_id = $1 AND expires_at > now() AND revoked_at IS NULL LIMIT 10', [userId]);
+
+        if (storedRefreshToken.rowCount === 0) {
+            // [交易] 失敗，返回
+            await client.query('ROLLBACK');
+            // 刪除cookie中的refreshToken紀錄
+            res.clearCookie("refreshToken");
+            // console.error("[api:auth/refresh] error:", storedRefreshToken);
+            return res.status(401).json({
+                ok: false,
+                error: "Refresh Token 已過期或不存在，請重新登入"
+            })
+        }
+
+        // 用bcrypt.compare逐一比對，找出匹配的token
+        for (const token of storedRefreshToken.rows) {
+            const isMatch = await bcrypt.compare(refreshToken, token.refresh_token_hash);
+            if (isMatch) {
+                matchedToken = token;
+                // 結束這個迴圈
+                break;
+            }
+        }
+        if (!matchedToken) {
+            await client.query('ROLLBACK');
+            res.clearCookie("refreshToken");
+            return res.status(401).json({
+                ok: false,
+                error: "Refresh Token 無效，請重新登入"
+            })
+        }
+
+        // 更新refresh_token table中的revoked_at為現在，表示此refreshToken被註銷
+        await client.query('UPDATE refresh_token SET revoked_at = now() WHERE id = $1 ', [matchedToken.id]);
+
+        // 查詢user data
+        const user = await client.query<{email:string, nickname:string}>('SELECT email, nickname FROM users WHERE id = $1 AND is_active = TRUE', [userId]);
+
+        if (user.rowCount === 0) {
+            await client.query('ROLLBACK');
+            res.clearCookie("refreshToken");
+            return res.status(401).json({
+                ok: false,
+                error: `帳戶不存在或已被停用，請重新登入`
+            })
+        }
+        // 把user的資料解包出來
+        const { email, nickname } = user.rows[0];
+
+        // 取得user的role
+        const userRole = await client.query<{type:string}>('SELECT r.type FROM role r JOIN user_role ur ON r.id = ur.role_id WHERE ur.user_id = $1', [userId]);
+
+        if (userRole.rowCount === 0) {
+            await client.query('ROLLBACK');
+            console.error(`[auth/login] user ${userId} 找不到角色`);
+            return res.status(500).json({
+                    ok: false,
+                    error: "系統錯誤，請稍後再試"
+            })
+        }
+        // 拿出user的role_type
+        const userRoleType:string = userRole.rows[0].type;
+
+        // 產生新的 access token 和 refresh token
+        // [標註] 因為id的型別是number，但我在jwtTool中的id型別是設定成string，所以為了避免麻煩就直接轉型成string帶進去了
+        const newAccessToken = jwtAuthTool.generateAccessToken({
+            id: userId.toString(),
+            name: nickname,
+            email: email,
+            role: userRoleType
+        });
+        const newRefreshToken = jwtAuthTool.generateRefreshToken(userId.toString());
+
+        // 把newRefreshToken加密
+        const newRefreshTokenHash = await bcrypt.hash(newRefreshToken, 10);
+
+        try {
+            const decode = jwtAuthTool.verifyToken(newRefreshToken, "refresh");
+            const exp = decode.claims?.exp;
+
+            if (typeof exp === "number") {
+                expiresAt = new Date(exp * 1000);
+                const ttlMs = exp * 1000 - Date.now();
+                tokenMaxAge = Math.max(0, ttlMs);
+            } else {
+                throw new Error("無法解析 exp");
+            }
+        } catch (err) {
+            await client.query('ROLLBACK');
+            console.error("[api:auth/refresh] 無法解析新 token 的過期時間:", err);
+            return res.status(500).json({
+                ok: false,
+                error: "系統錯誤，請稍後再試"
+            });
+        }
+
+        // 準備設備資料
+        const userAgent = req.get("user-agent") ?? null;
+        const userIp = req.ip; // [標主] 目前的ip取得方法，好像會有問題，但先這樣
+        const lastUsedAt = new Date();
+
+        //  插入新的 refresh token
+        await client.query('INSERT INTO refresh_token(user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at) VALUES ($1, $2, $3, $4, $5, $6, $7)', [userId, newRefreshTokenHash, userAgent, userIp, expiresAt, "", lastUsedAt]);
+
+        // 更新最後登入時間
+        await client.query('UPDATE users SET last_login_at = $1 WHERE id = $2', [lastUsedAt, userId]);
+
+        // [交易] 成功，結束
+        await client.query('COMMIT');
+
+        // 設置新的 cookie
+        res.cookie("refreshToken", newRefreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            maxAge: tokenMaxAge,
+            sameSite: "lax",
+            path: "/",
+        });
+
+        return res.status(200).json({
+            ok: true,
+            message: "Token 刷新成功",
+            accessToken: newAccessToken,
+            user: {
+                id: userId,
+                email: email,
+                nickname: nickname,
+                role: userRoleType,
+            },
+        });
+    } catch (err) {
+        if (client) {
+            // 多包一層try catch是為了讓finally可以被執行
+            // 如果沒有包的話，會停留在catch上
+            // 這樣就不能釋放pool的連線資源
+            try {
+                await client.query('ROLLBACK');
+            } catch {}
+        }
+
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[api:auth/refresh] error:", msg, err);
+        return res.status(500).json({
+            ok: false,
+            error: "系統錯誤，請稍後再試",
+        });
+    } finally {
+        // [交易] 最後釋放連線
+        if (client) client.release();
+    }
+}
+
+// [api] 單一登出功能
+export const logout = async (req:Request, res:Response) => {
+
 }

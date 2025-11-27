@@ -101,7 +101,7 @@ export class jwtProvider {
             algorithm: "HS256",
             issuer: this.ISSUER,
             audience: this.AUDIENCE,
-            subject: id, // 建議把 id 放在 sub，也會同時保留在 payload
+            subject: id.toString(), // 建議把 id 放在 sub，也會同時保留在 payload
         };
         // payload 實際資料，用id是因為refresh不用太多資料，因為它的用途很單純，就是幫助access重新被取得
         // 所以payload不用太多資料，用id就好
