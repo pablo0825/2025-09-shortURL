@@ -5,6 +5,7 @@
 import express from 'express';
 // import path from 'path';
 import type { Request, Response, NextFunction } from 'express';
+import cookieParser from 'cookie-parser';
 // 引入變數
 import { pool } from "./pool";
 import router from "./route/link.route";
@@ -16,6 +17,7 @@ import { cacheShortUrl } from "./middleware/cacheShortUrl";
 const app = express();
 
 app.use(express.json());
+app.use(cookieParser());
 
 const port = Number(process.env.PORT ?? 3001);
 // console.log(process.env.PORT);

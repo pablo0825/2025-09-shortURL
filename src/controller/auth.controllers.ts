@@ -9,6 +9,7 @@ import {registerSchema, loginSchema} from "../zod/auth.schema";
 import * as crypto from "node:crypto";
 import bcrypt from "bcrypt";
 import {id} from "zod/locales";
+import {decode} from "node:punycode";
 
 const jwtAuthTool = new jwtProvider();
 const redisAuthTool = new redisProvider();
@@ -493,5 +494,87 @@ export const refresh = async (req:Request, res:Response) => {
 
 // [api] 單一登出功能
 export const logout = async (req:Request, res:Response) => {
+    // 變數
+    let userId:number;
+    let matchedToken: {id:number, refresh_token_hash: string} | null = null;
 
+    const refreshToken:string = req.cookies?.refreshToken;
+
+    if (!refreshToken) {
+        return res.status(401).json({
+            ok: false,
+            error: "未提供 Refresh Token，請重新登入"
+        });
+    }
+
+    // 驗證jwt，取得suer_id
+    try {
+        const decode = jwtAuthTool.verifyToken(refreshToken, "refresh");
+        const id:string | undefined = decode.claims?.id;
+
+        if (!id || isNaN(Number(id))) {
+            throw new Error("Token 中缺少 user_id");
+        }
+
+        userId = Number(id);
+    } catch (err) {
+        console.error("[api:auth/logout] JWT 驗證失敗:", err);
+        // 刪除 cookie 中的 refreshToken 紀錄
+        res.clearCookie("refreshToken");
+        return res.status(401).json({
+            ok: false,
+            error: "Refresh Token 無效，請重新登入"
+        });
+    }
+
+    // 從refresh token table中找到匹配的token
+    try {
+        const storedRefreshToken = await pool.query<{id:number, refresh_token_hash: string}>('SELECT id, refresh_token_hash FROM refresh_token WHERE user_id = $1 AND expires_at > now() AND revoked_at IS NULL LIMIT 10', [userId]);
+
+        // 不存在也視為成功(幕等性)
+        // 第一次呼叫logout api有可能已經成功了，但因為延遲的關係，所以還沒回傳
+        // 但如果使用者又按下一次，這樣的話，原本的設計會回傳失敗
+        // 所以這邊把不存在，也視為一種登出成功
+        if (storedRefreshToken.rowCount === 0) {
+            res.clearCookie("refreshToken");
+            return res.status(200).json({
+                ok: true,
+                message: "登出成功"
+            })
+        }
+
+        for (const token of storedRefreshToken.rows) {
+            const isMatch = await bcrypt.compare(refreshToken, token.refresh_token_hash);
+            if (isMatch) {
+                matchedToken = token;
+                break;
+            }
+        }
+
+        if (!matchedToken) {
+            res.clearCookie("refreshToken");
+            return res.status(200).json({
+                ok: true,
+                message: "登出成功"
+            })
+        }
+
+        // 註銷refresh token
+        await pool.query('UPDATE refresh_token SET revoked_at = now() WHERE id = $1', [matchedToken.id]);
+
+        // 清除cookie
+        res.clearCookie("refreshToken");
+
+        return res.status(200).json({
+            ok: true,
+            message: "登出成功"
+        })
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[api:auth/logout] error:", msg, err);
+        return res.status(500).json({
+            ok: false,
+            error: "系統錯誤，請稍後再試"
+        });
+    }
 }
