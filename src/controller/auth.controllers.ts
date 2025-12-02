@@ -1,15 +1,15 @@
 // auth.controllers.ts
-import e, {Request, Response} from "express";
+import {Request, Response} from "express";
 import type {PoolClient} from "pg";
 import {pool} from "../pool";
 import redis from "../redis/redisClient";
 import {jwtProvider} from "../utils/jwtProvider";
 import {redisProvider} from "../utils/redisProvider";
-import {registerSchema, loginSchema} from "../zod/auth.schema";
+import {registerSchema, loginSchema, logoutTokenIdSchema} from "../zod/auth.schema";
 import * as crypto from "node:crypto";
 import bcrypt from "bcrypt";
-import {id} from "zod/locales";
-import {decode} from "node:punycode";
+import {handleAccessTokenBlackList} from "../utils/handleAccessTokenBlackList"
+
 
 const jwtAuthTool = new jwtProvider();
 const redisAuthTool = new redisProvider();
@@ -503,7 +503,7 @@ export const logout = async (req:Request, res:Response) => {
     if (!refreshToken) {
         return res.status(401).json({
             ok: false,
-            error: "未提供 Refresh Token，請重新登入"
+            error: "未提供 Refresh Token"
         });
     }
 
@@ -523,7 +523,7 @@ export const logout = async (req:Request, res:Response) => {
         res.clearCookie("refreshToken");
         return res.status(401).json({
             ok: false,
-            error: "Refresh Token 無效，請重新登入"
+            error: "Refresh Token 無效"
         });
     }
 
@@ -553,6 +553,9 @@ export const logout = async (req:Request, res:Response) => {
 
         if (!matchedToken) {
             res.clearCookie("refreshToken");
+            // 即使token無效，還是要處理accessToken的黑名單
+            await handleAccessTokenBlackList(req);
+
             return res.status(200).json({
                 ok: true,
                 message: "登出成功"
@@ -565,6 +568,9 @@ export const logout = async (req:Request, res:Response) => {
         // 清除cookie
         res.clearCookie("refreshToken");
 
+        // 額外:處理access token的黑名單
+        await handleAccessTokenBlackList(req);
+
         return res.status(200).json({
             ok: true,
             message: "登出成功"
@@ -575,6 +581,120 @@ export const logout = async (req:Request, res:Response) => {
         return res.status(500).json({
             ok: false,
             error: "系統錯誤，請稍後再試"
+        });
+    }
+}
+
+// [api] 登出功能(所有裝置)
+// [標註] 目前不知道怎麼解決accessToken的問題，因為我沒有紀錄它。
+// 但accessToken也沒有紀錄的必要，所以只要把當下那個裝置也關到黑名單就好
+export const logoutAll = async (req:Request, res:Response) => {
+    let client: PoolClient | undefined;
+
+    const userId = req.user?.id;
+    if (!userId) {
+        return res.status(401).json({
+            ok: false,
+            error: "未授權"
+        })
+    }
+
+    // 從資料庫獲得一條單獨的連線
+    client = await pool.connect();
+
+    try {
+        // [交易] 開始
+        await client.query('BEGIN');
+
+        // 取得有效的refreshToken數量
+        const tokens = await client.query('SELECT refresh_token_hash FROM refresh_token WHERE user_id = $1 AND revoked_at IS NULL', [userId]);
+
+        // 註銷所有refreshToken
+        await client.query('UPDATE refresh_token SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [userId]);
+
+        // [交易] 成功，結束
+        await client.query('COMMIT');
+
+        // 額外:處理access token的黑名單
+        await handleAccessTokenBlackList(req);
+
+        // 清除cookie
+        res.clearCookie("refreshToken");
+
+        return res.status(200).json({
+            ok: true,
+            message: `已登出 ${tokens.rowCount} 個裝置`
+        });
+    } catch (err) {
+        if (client) {
+            // 多包一層try catch是為了讓finally可以被執行
+            // 如果沒有包的話，會停留在catch上
+            // 這樣就不能釋放pool的連線資源
+            try {
+                await client.query('ROLLBACK');
+            } catch {}
+        }
+
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[api:auth/logoutAll] error:", msg, err);
+        return res.status(500).json({
+            ok: false,
+            error: "系統錯誤"
+        });
+    } finally {
+        if (client) client.release();
+    }
+}
+
+// [api] 指定裝置登出
+export const logoutDevice = async (req:Request, res:Response) => {
+    const userId = req.user?.id;
+
+    if (!userId) {
+        return res.status(401).json({
+            ok: false,
+            error: "未授權"
+        })
+    }
+
+    const tokenIdParam = logoutTokenIdSchema.safeParse(req.params.tokenId);
+
+    if (!tokenIdParam.success) {
+        // .issues 這個陣列中包含所有驗證失敗的資訊
+        // ?.message 用?檢查issues[0]是否不存在，或是為null或undefined
+        // ?? 運算式，左側為空的話，則回傳右側值
+        const msg = tokenIdParam.error.issues[0]?.message ?? "tokenId 格式錯誤"
+        return res.status(400).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const tokenId:number = tokenIdParam.data;
+
+    try {
+        const result =  await pool.query('UPDATE refresh_token SET revoked_at = now() WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL', [tokenId, userId]);
+
+        // 檢查是否有更新資料
+        if (result.rowCount === 0) {
+            return res.status(404).json({
+                ok: false,
+                error: "裝置不存在、已登出或不屬於您"
+            })
+        }
+
+        return res.status(200).json({
+            ok: true,
+            message: "裝置已登出"
+        });
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+
+        console.error("[api:auth/logoutDevice] error:", msg, err);
+
+        return res.status(500).json({
+            ok: false,
+            error: "系統錯誤"
         });
     }
 }

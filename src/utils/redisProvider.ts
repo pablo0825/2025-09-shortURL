@@ -45,10 +45,14 @@ export class redisProvider {
     // [功能5] 將accessToken加入黑名單
     // expirationMa是accessToken的剩餘時間
     public async addToBlacklist(accessToken: string, expirationMs: number):Promise<void> {
-        if(expirationMs <= 0) return;
+        // 計算現在的時間
+        const nowSec:number = Math.floor(Date.now() / 1000);
+        // 過期時間 = token過期時間 - 現在時間
+        const ttlSec:number = Math.max(0, expirationMs - nowSec);
+        if(ttlSec <= 0) return;
         const hashed:string = this.hashToken(accessToken);
         const key:string = `blacklist:${hashed}`;
-        await this.redisClient.setEx(key, expirationMs, "1");
+        await this.redisClient.setEx(key, ttlSec, "1");
     }
 
     // [功能6] 檢查accessToken是否有被加入黑名單
