@@ -27,6 +27,7 @@ const LongUrlSchema = longUrlSchema({
 const MIN_LENGTH = 5;
 const OFFSET = BigInt(62 ** (MIN_LENGTH - 1));
 
+// [api] 新增短網址
 // 建立shortUrl，同時把shortUrl的資料推到link_task中
 export const createShortUrl = async (req: Request, res: Response) => {
     let client: PoolClient | undefined;
@@ -121,6 +122,7 @@ export const createShortUrl = async (req: Request, res: Response) => {
     }
 }
 
+// [api] 重定向長網址
 // 運用快取加速URL轉跳的速度
 // 用負向快取預防大量不存在的shortURL攻擊
 // 單飛鎖：在多人重定向的情況下，確保只有一個人可以進到db，其他人進入等待模式
@@ -274,6 +276,7 @@ export const redirectToLongUrl = async (req: Request, res: Response) => {
     }
 }
 
+// [api] 查詢所有短網址
 export const getAllLinks = async (req: Request, res: Response) => {
     try {
         // 保底數字
@@ -345,6 +348,7 @@ export const getAllLinks = async (req: Request, res: Response) => {
     }
 }
 
+// [api] 刪除link
 export const deleteLink = async (req: Request, res: Response) => {
     try {
         // const id:number = Number(req.params.id);

@@ -129,12 +129,14 @@ user API:
 
 ### permissions table:
 
-| 欄位          | 型別     | 用途              |
-|-------------|--------|-----------------|
-| id          | number | 主鍵              |
-| resource    | string | 資源，或是說可處理的範圍    |
-| action      | string | creat, update等等 |
-| description | string | 說明可以做甚麼         |
+| 欄位          | 型別     | 用途                                       |
+|-------------|--------|------------------------------------------|
+| id          | number | 主鍵                                       |
+| name        | string | 權限名稱                                     |
+| type        | string | N/A, create, update, read, delete, export |
+| description | string | 說明可以做甚麼                                  |
+| module      | string | 模組                                       |
+| parent_id   | number | 樹狀結構，預設為NULL                             |
 
 ### role_permissions:
 
@@ -143,4 +145,66 @@ user API:
 | id             | number | 主鍵   |
 | role_id        | number | 約束外鍵 |
 | permissions_id | number | 約束外鍵 |
+
+### 權限表:
+
+auth照理說，不會設定到權限表中。
+
+| parent_id | module | name      | type          | description                                 |
+|-----------|--------|-----------|---------------|---------------------------------------------|
+| NULL      | auth   | 身分驗證      | N/A           | 身分驗證的父節點                                    |
+| 1         | auth   | 註冊帳號      | create        | 允許建立新帳號                                     |
+| 1         | auth   | 登入        | login         | 允許使用者登入帳號                                   |
+| 1         | auth   | 刷新token   | refresh       | 允許使用refresh token獲得新的access token           |
+| 1         | auth   | 驗證email   | verify        | 允許驗證使用者註冊時的email                            |
+| 1         | auth   | 忘記密碼      |               |                                             |
+| 1         | auth   | 重設密碼      | reset         | 允許使用者重新設定密碼                                 |
+| 1         | auth   | 登出        | logout        | 允許使用者登出當前裝置                                 |
+| 1         | auth   | 登出所有裝置    | logout_all    | 允許使用者強制登出所有裝置                               |
+| 1         | auth   | 登出指定裝置    | logout_device | 允許使用者登出指定裝置                                 |
+| NULL      | link   | 短網址服務     | N/A           | 短網址服務的父節點                                   |
+| 2         | link   | 建立link    | create        | 允許建立短網址                                     |
+| 2         | link   | 查詢link列表  | read          | 允許查詢使用者擁有的link list                         |
+| 2         | link   | 查詢link詳情  | read          | 允許使用者查詢單一link的統計資料                          |
+| 2         | link   | 更新link資料  | update        | 允許使用者修改單一link的資料，如: longURL, 社交標題, 社交縮圖, 別名 |
+| 2         | link   | 停用link    | disable       | 允許使用者將單一link設為停用狀態                          |
+| 2         | link   | 刪除link    | delete        | 允許使用者永久刪除單一link                             |
+| 2         | link   | 下載QR Code | export        | 允許使用者下載單一link的QR Code                       |
+| NULL      |        |           |               |                                             |
+
+
+
+link:
+新增link
+重定向長網址
+查詢所有link
+刪除link
+停用link
+更換link的longURL
+自訂link的社交標題, 縮圖
+產生link的QR code
+下載link的QR code
+
+auth:
+註冊帳號 (還需要補上註冊email通知)
+登入
+刷新token
+單一登出
+所有裝置登出
+指定裝置登出
+忘記密碼
+重設密碼
+驗證email
+
+user:
+更新使用者資料
+更新使用者頭像
+
+
+admin:
+取得所有使用者資料
+設定角色權限
+分配角色給使用者
+刪除使用者(軟刪除)
+
 
