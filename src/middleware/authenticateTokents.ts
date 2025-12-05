@@ -50,6 +50,7 @@ export const authenticate = async (req: Request, res: Response, next:NextFunctio
             })
         }
 
+        // [標記] user底下要有一個permissions，就是這個角色的權限表
         req.user = {
             id: id,
             email: email,

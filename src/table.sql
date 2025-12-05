@@ -116,3 +116,61 @@
 --     role_id BIGINT NOT NULL REFERENCES role(id) ON DELETE CASCADE  -- 外鍵
 -- );
 
+
+-- 2025/12/05
+-- CREATE TABLE permissions (
+--     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY , -- 主鍵
+--     name VARCHAR(50) NOT NULL , -- 權限名稱
+--     type VARCHAR(50) NOT NULL , -- 權限類型
+--     module VARCHAR(50) NOT NULL , -- 模組，如: link, user, admin
+--     description TEXT , -- 權限說明
+--     parent_id BIGINT NULL , -- 樹狀結構
+--
+--     CONSTRAINT uq_permissions_module_type UNIQUE (module, type), -- 約束: module + type 的組合不能重複
+--
+--     CONSTRAINT fk_permission_parent FOREIGN KEY (parent_id) REFERENCES permissions (id) ON DELETE SET NULL -- 約束: 建立自我參考的關係，用於處理樹狀結構
+--     -- on delete set null 這邊的意思是，如果父節點被刪除了，下面的子節點不會被刪除，只是變成頂點或無父節點的權限。
+--
+-- );
+--
+-- CREATE INDEX idx_permissions_parent_id  ON permissions (parent_id); -- 新增索引: parent_id
+--
+-- CREATE TABLE role_permissions (
+--     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY , -- 主鍵
+--     role_id BIGINT NOT NULL REFERENCES role (id) ON DELETE CASCADE , -- 外鍵
+--     permissions_id BIGINT NOT NULL REFERENCES  permissions (id) ON DELETE CASCADE , -- 外鍵
+--
+--     CONSTRAINT uq_role_permission UNIQUE (role_id, permissions_id) -- 約束: 確保一個角色，只會被賦予一次相同的權限
+-- );
+
+-- INSERT INTO permissions (name, type, module, description, parent_id) VALUES
+--    ('短網址服務', 'N/A', 'link', '短網址服務的父節點', NULL),
+--    ('使用者資料', 'N/A', 'user', '使用者資料的父節點', NULL),
+--    ('管理員控制', 'N/A', 'admin', '管理員控制的父節點', NULL )
+
+-- link的權限加入
+-- INSERT INTO permissions (name, type, module, description, parent_id) VALUES
+--     ('建立link', 'create', 'link', '允許使用者建立短網址', 1),
+--     ('查詢link列表', 'list', 'link', '允許使用者查詢自己擁有的link列表', 1),
+--     ('查詢link詳情', 'read_stats', 'link', '允許使用者查詢自己的單一link的統計資料', 1),
+--     ('更新link', 'update', 'link', '允許使用者修改單一link的資料', 1),
+--     ('停用link', 'disable', 'link', '允許使用者將單一link設為停用', 1),
+--     ('刪除link', 'delete', 'link', '允許使用者永久刪除單一link', 1),
+--     ('下載QR Code', 'export', 'link', '允許使用者下載單一link的QR Code', 1)
+
+-- INSERT INTO permissions(name, type, module, description, parent_id) VALUES
+--      ('讀取個人資料', 'read', 'user', '允許使用者讀取自己的完整資料', 2),
+--      ('更新個人資料', 'update_profile', 'user', '允許使用者更新自己的資料', 2),
+--      ('更新個人頭像', 'update_avatar', 'user', '允許使用者更新自己的頭像', 2),
+--      ('更新密碼', 'update_password', 'user', '允許使用者更新自己的密碼', 2),
+--      ('刪除帳號', 'soft_delete', 'user', '允許使用者刪除自己的帳號', 2),
+--      ('2fa驗證', 'manage_2fa', 'user', '允許使用者啟用、停用與管理自己的兩步驟驗證設定', 2)
+
+INSERT INTO permissions(name, type, module, description, parent_id) VALUES
+        ('查詢使用者列表', 'list_user', 'admin', '允許管理員取得所有使用者列表', 3),
+        ('設定角色權限', 'manage_role', 'admin', '允許管理員編輯角色的權限', 3),
+        ('分配角色給使用者', 'assign_role', 'admin', '允許管理員分配角色給使用者', 3),
+        ('軟刪除使用者', 'soft_delete_user', 'admin', '允許管理員將使用者帳號停用', 3),
+        ('恢復使用者', 'restore_user', 'admin', '允許管理員恢復使用者帳號', 3),
+        ('查看統計資料', 'view_stats', 'admin', '允許管理員查看儀表板和系統運行數據', 3),
+        ('查詢所有link列表', 'read_all_link', 'admin', '允許管理員查詢所有使用者的link列表', 3)

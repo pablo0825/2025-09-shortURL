@@ -184,6 +184,7 @@ export const login = async (req: Request, res: Response) => {
             })
         }
 
+        // [標記] 這邊感覺要修改
         // 取得user的role
         const userRole = await client.query<{type:string}>('SELECT r.type FROM role r JOIN user_role ur ON r.id = ur.role_id WHERE ur.user_id = $1', [id]);
         if (userRole.rowCount === 0) {

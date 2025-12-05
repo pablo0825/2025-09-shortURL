@@ -7,15 +7,15 @@ import redis from "../redis/redisClient";
 export async function deleteCheckForDisabledLinks () {
     // 查詢狀態是is_active = FALSE的code
     const query = await pool.query<{ code:string }>('SELECT code FROM links WHERE is_active = FALSE');
-    const { rowCount, rows } = query;
+    // const { rowCount, rows } = query;
 
-    if (rowCount === 0) {
+    if (query.rowCount === 0) {
         console.log("[CRON-02] 沒有停用的 link，無需清理快取");
         return;
     }
 
     const keys: string[] = [];
-    for (const row of rows) {
+    for (const row of query.rows) {
         const code = row.code;
         // 把全部的code push到keys中
         keys.push(`short:${code}`);
