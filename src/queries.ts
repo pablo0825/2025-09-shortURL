@@ -1,54 +1,67 @@
-import { jwtProvider } from "./utils/jwtProvider";
-import dotenv from 'dotenv';
-dotenv.config({ path: '../.env' });
+import {pool} from "./pool";
+import type { PoolClient } from "pg";
+import redis from "../src/redis/redisClient"
 
-// ✅ 合法 AccessClaims
-const okAccess: any = {
-    id: "u_123",
-    name: "Pablo Guo",
-    email: "pablo@example.com",
-    role: "admin",
-};
+// [未完成]
+// export async function loadRbacFromDb () {
+//     //
+//     console.log("[RBAC] 開始載入權限至 Redis...");
+//
+//     try {
+//         // 取出 all role
+//         const roles = await pool.query<{id:number, type:string}>('SELECT id, type FROM role');
+//
+//         if (roles.rowCount === 0) {
+//             throw new Error("[RBAC] 沒有找到角色資料");
+//         }
+//
+//         console.log(roles.rows);
+//
+//         // [標記] 有用{} 記得加上return，不然不會傳資料回來
+//         const permissions = roles.rows.map(role => {
+//            return  pool.query<{module:string, type:string}>('SELECT p.module, p.type FROM permissions p JOIN role_permissions rp ON p.id = rp.permissions_id WHERE rp.role_id = $1', [role.id]);
+//         });
+//
+//         // 一次跑複數查詢，不是成功，就是失敗
+//         const permissionResults = await Promise.all(permissions);
+//
+//         const redisWrites = roles.rows.map(async (role, index) => {
+//             const redisKey = `role:${role.type}:permissions`;
+//
+//             // 把module, type等欄位組合
+//             const permission = permissionResults[index].rows.map(p => {
+//                 return `${p.module}:${p.type}`
+//             });
+//
+//             // 把舊資料刪掉
+//             await redis.del(redisKey);
+//
+//             // 檢查角色有沒有權限
+//             if (permission.length === 0) {
+//                 console.warn(`[RBAC] 角色 ${role.type} 沒有權限 (已清除舊的快取)`);
+//                 return Promise.resolve();
+//             }
+//
+//             // const pipeline = redis.pipeline();
+//
+//             // 把permission寫入到redis中
+//             await redis.sadd(redisKey, ...permission);
+//
+//             // 設定過期時間
+//             // await redis.expire(redisKey, 3600);
+//
+//             console.log(`[RBAC] ${role.type}: ${permission.length} 個權限已載入`);
+//         });
+//
+//         //
+//         await Promise.all(redisWrites);
+//
+//         console.log(`[RBAC] ✅ RBAC 權限載入完成,共 ${roles.rowCount} 個角色`);
+//     } catch (err) {
+//         console.error('[RBAC] ❌ 載入 RBAC 權限失敗:', err);
+//         throw err;
+//     }
+// }
+//
+// loadRbacFromDb();
 
-// ❌ 不合法：缺少 email
-const badAccess_missingEmail: any = {
-    id: "u_124",
-    name: "NoEmail User",
-    role: "user",
-};
-
-// ❌ 不合法：email 格式錯誤
-const badAccess_invalidEmail: any = {
-    id: "u_125",
-    name: "Invalid Email",
-    email: "not-an-email",
-};
-
-// ✅ 合法 Refresh 原料（你的方法收 string，再由 zod parse 出 { id }）
-const okRefreshId = "u_123";
-const otherRefreshId = "u999"; // 可用來測「id 不同」的情境
-
-const jwt = new jwtProvider();
-
-function main() {
-    const access = jwt.generateAccessToken(okAccess);
-    const refresh = jwt.generateRefreshToken(otherRefreshId);
-    console.log(access);
-    console.log(refresh);
-
-    // 驗證 access
-    const v1 = jwt.verifyToken(access, "access");
-    console.log("[verify access]", v1);
-
-    // 驗證 refresh（用錯 type 模擬錯誤）
-    const v2 = jwt.verifyToken(refresh, "access");
-    console.log("[verify refresh with access secret -> expect invalid]", v2);
-
-    // 驗證 refresh（正確）
-    const v3 = jwt.verifyToken(refresh, "refresh");
-    console.log("[verify refresh]", v3);
-}
-
-// main();
-
-console.log(Date.now());

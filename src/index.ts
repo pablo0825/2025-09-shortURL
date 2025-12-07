@@ -12,6 +12,7 @@ import router from "./route/link.route";
 import authRoute from "./route/auth.route";
 import { redirectToLongUrl } from "./controller/link.controllers";
 import { cacheShortUrl } from "./middleware/cacheShortUrl";
+import {loadRbacFromDb} from "./rbac/loadRbacFromDb"
 // import "./task/tasks"
 
 const app = express();
@@ -49,7 +50,29 @@ app.get("/:code", cacheShortUrl, redirectToLongUrl);
 
 app.use((_req:Request, res:Response) => res.status(404).send("Not Found"));
 
-console.log('About to listen on', port);
-app.listen(port, () => {
-    console.log(`Server is running on http://localhost:${port}`);
-})
+async function bootstrap() {
+    try {
+        console.log('=== 伺服器啟動中 ===');
+
+        // 1. 測試資料庫連線
+        console.log('[1/3] 檢查資料庫連線...');
+        await pool.query('SELECT NOW()');
+        console.log('✅ 資料庫連線成功');
+
+        // 3. 載入 RBAC 權限
+        console.log('[3/3] 載入 RBAC 權限...');
+        await loadRbacFromDb();
+
+        // 4. 啟動伺服器
+        app.listen(port, () => {
+            console.log(`Server is running on http://localhost:${port}`);
+        });
+    } catch (err) {
+        
+    }
+}
+
+
+
+
+

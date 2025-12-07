@@ -98,18 +98,18 @@
 -- 加這個是為了避免，同時有複數使用者用相同的email或nickname註冊帳號，可以通過unique的唯一性把這個可能檔下來
 -- ALTER TABLE users ADD CONSTRAINT users_nickname_uk UNIQUE (nickname);
 -- ALTER TABLE users ADD CONSTRAINT  users_email_uk UNIQUE  (email);
-
+--
 -- ALTER TABLE refresh_token ALTER COLUMN expires_at DROP NOT NULL;
-
+--
 -- CREATE TYPE role_type AS ENUM ('admin', 'user', 'assistant');
 --
 -- CREATE TABLE role (
 --     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY , -- 主鍵
 --     type role_type NOT NULL DEFAULT 'user' --
 -- );
-
+--
 --     link_id BIGINT NOT NULL REFERENCES links(id) ON DELETE CASCADE , -- 外鍵，引用自link_id
-
+--
 -- CREATE TABLE user_role (
 --     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY , -- 主鍵
 --     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE , -- 外鍵
@@ -142,12 +142,12 @@
 --
 --     CONSTRAINT uq_role_permission UNIQUE (role_id, permissions_id) -- 約束: 確保一個角色，只會被賦予一次相同的權限
 -- );
-
+--
 -- INSERT INTO permissions (name, type, module, description, parent_id) VALUES
 --    ('短網址服務', 'N/A', 'link', '短網址服務的父節點', NULL),
 --    ('使用者資料', 'N/A', 'user', '使用者資料的父節點', NULL),
 --    ('管理員控制', 'N/A', 'admin', '管理員控制的父節點', NULL )
-
+--
 -- link的權限加入
 -- INSERT INTO permissions (name, type, module, description, parent_id) VALUES
 --     ('建立link', 'create', 'link', '允許使用者建立短網址', 1),
@@ -157,7 +157,7 @@
 --     ('停用link', 'disable', 'link', '允許使用者將單一link設為停用', 1),
 --     ('刪除link', 'delete', 'link', '允許使用者永久刪除單一link', 1),
 --     ('下載QR Code', 'export', 'link', '允許使用者下載單一link的QR Code', 1)
-
+--
 -- INSERT INTO permissions(name, type, module, description, parent_id) VALUES
 --      ('讀取個人資料', 'read', 'user', '允許使用者讀取自己的完整資料', 2),
 --      ('更新個人資料', 'update_profile', 'user', '允許使用者更新自己的資料', 2),
@@ -165,12 +165,36 @@
 --      ('更新密碼', 'update_password', 'user', '允許使用者更新自己的密碼', 2),
 --      ('刪除帳號', 'soft_delete', 'user', '允許使用者刪除自己的帳號', 2),
 --      ('2fa驗證', 'manage_2fa', 'user', '允許使用者啟用、停用與管理自己的兩步驟驗證設定', 2)
+--
+-- INSERT INTO permissions(name, type, module, description, parent_id) VALUES
+--         ('查詢使用者列表', 'list_user', 'admin', '允許管理員取得所有使用者列表', 3),
+--         ('設定角色權限', 'manage_role', 'admin', '允許管理員編輯角色的權限', 3),
+--         ('分配角色給使用者', 'assign_role', 'admin', '允許管理員分配角色給使用者', 3),
+--         ('軟刪除使用者', 'soft_delete_user', 'admin', '允許管理員將使用者帳號停用', 3),
+--         ('恢復使用者', 'restore_user', 'admin', '允許管理員恢復使用者帳號', 3),
+--         ('查看統計資料', 'view_stats', 'admin', '允許管理員查看儀表板和系統運行數據', 3),
+--         ('查詢所有link列表', 'read_all_link', 'admin', '允許管理員查詢所有使用者的link列表', 3)
 
-INSERT INTO permissions(name, type, module, description, parent_id) VALUES
-        ('查詢使用者列表', 'list_user', 'admin', '允許管理員取得所有使用者列表', 3),
-        ('設定角色權限', 'manage_role', 'admin', '允許管理員編輯角色的權限', 3),
-        ('分配角色給使用者', 'assign_role', 'admin', '允許管理員分配角色給使用者', 3),
-        ('軟刪除使用者', 'soft_delete_user', 'admin', '允許管理員將使用者帳號停用', 3),
-        ('恢復使用者', 'restore_user', 'admin', '允許管理員恢復使用者帳號', 3),
-        ('查看統計資料', 'view_stats', 'admin', '允許管理員查看儀表板和系統運行數據', 3),
-        ('查詢所有link列表', 'read_all_link', 'admin', '允許管理員查詢所有使用者的link列表', 3)
+-- 2025/12/06
+-- 補：
+-- INSERT INTO role (type) VALUES ('admin'), ('user'), ('assistant');
+
+-- 設定admin權限
+-- INSERT INTO role_permissions (role_id, permissions_id) VALUES
+--     -- admin的主要權限
+--     (1, 17), (1, 18), (1, 19), (1, 20),
+--     (1, 21), (1, 22), (1, 23),
+--     -- user的部分權限
+--     (1, 11), (1, 12), (1, 13),
+--     -- link的部分權限
+--     (1, 6), (1, 7), (1, 8), (1, 9)
+
+-- 設定user權限
+-- INSERT INTO role_permissions (role_id, permissions_id) VALUES
+--     -- link的全部權限
+--     (2, 4), (2, 5), (2, 6), (2, 7),
+--     (2, 8), (2, 9), (2, 10),
+--     -- user的全部權限
+--     (2, 11), (2, 12), (2, 13), (2, 14),
+--     (2, 15), (2, 16)
+
