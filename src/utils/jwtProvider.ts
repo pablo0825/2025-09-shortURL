@@ -39,7 +39,6 @@ export class jwtProvider {
     // 初始化實例物件
     constructor() {
         // 把access, refresh的私鑰，從環境變數中拿出來存成變數
-        console.log(process.env.JWT_ACCESS_SECRET);
         const accessSecret = process.env.JWT_ACCESS_SECRET;
         const refreshSecret = process.env.JWT_REFRESH_SECRET;
         // 把access, refresh的過期時間，從環境變數中拿出來存成變數
@@ -126,31 +125,38 @@ export class jwtProvider {
                 audience: this.AUDIENCE,
                 clockTolerance: this.CLOCK_TOLERANCE_SEC,
             });
+
             // claims應該要是物件
             if (typeof claims === "string") {
                 return { ok: false, reason: "invalid", msg: "[jwt] token payload不是物件!" };
             }
+
             // claims需要包含subject或id
             if (!claims.sub && !claims.id) {
                 return { ok: false, reason: "invalid", msg: "[jwt] 缺少 subject或id" };
             }
+
             //
             const id = (claims.sub as string) ?? (claims.id as string);
             const normalized:AccessClaims = {...claims, id} as AccessClaims;
+
             return { ok: true, claims: normalized };
         } catch (err) {
             // token過期錯誤
             if (err instanceof TokenExpiredError) {
                 return { ok: false, reason: "expired", msg: err.message };
             }
+
             // 生效時間未到錯誤，簡單說，就是還沒到可以使用的時候
             if (err instanceof NotBeforeError) {
                 return { ok: false, reason: "notBefore", msg: err.message };
             }
+
             // 一般的jwt錯誤，如：簽名不匹配, 無效的發簽者
             if (err instanceof JsonWebTokenError) {
                 return { ok: false, reason: "invalid", msg: err.message };
             }
+
             // 其他錯誤
             return { ok: false, reason: "other", msg: (err as Error).message };
         }

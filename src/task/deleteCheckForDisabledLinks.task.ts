@@ -15,6 +15,7 @@ export async function deleteCheckForDisabledLinks () {
     }
 
     const keys: string[] = [];
+
     for (const row of query.rows) {
         const code = row.code;
         // 把全部的code push到keys中

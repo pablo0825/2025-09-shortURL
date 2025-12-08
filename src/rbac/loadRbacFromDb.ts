@@ -32,8 +32,6 @@ async function _loadRbacFromDb () {
         throw new Error("[RBAC] 沒有找到角色資料");
     }
 
-    console.log(roles.rows);
-
     // [標記] 有用{} 記得加上return，不然不會傳資料回來
     const permissions = roles.rows.map(role => {
         return  pool.query<{module:string, type:string}>('SELECT p.module, p.type FROM permissions p JOIN role_permissions rp ON p.id = rp.permissions_id WHERE rp.role_id = $1', [role.id]);

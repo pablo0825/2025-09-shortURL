@@ -16,18 +16,44 @@ redis.on("error", (err) => {
     console.error("❌ Redis Client Error:", err);
 });
 
+redis.on('connect', () => {
+    console.log('🔄 Redis 正在連接...');
+});
+
+redis.on('ready', () => {
+    console.log('✅ Redis 已就緒');
+});
+
+redis.on('end', () => {
+    console.log('⚠️ Redis 連線已關閉');
+});
+
 // 嘗試連線
 // (async () => {})() 自執行的匿名異步函式
 // 方法：匿名()
 // 連線時自動執行函式
-(async () => {
+// (async () => {
+//     try {
+//         await redis.connect(); //連線
+//         await redis.ping(); // 檢查連線是否正常
+//         console.log("✅ Redis 連線成功!");
+//     } catch (err) {
+//         console.error("❌ Redis connection failed:", err);
+//     }
+// })();
+
+export async function initRedis() {
     try {
-        await redis.connect(); //連線
-        await redis.ping(); // 檢查連線是否正常
-        console.log("✅ Redis 連線成功!");
+        if (!redis.isOpen) {
+            // 連線
+            await redis.connect();
+            console.log("✅ Redis 連接成功");
+        }
     } catch (err) {
-        console.error("❌ Redis connection failed:", err);
+        console.error("❌ Redis 連接失敗:", err);
+        // 向上拋出錯誤,讓 bootstrap 捕獲
+        throw err;
     }
-})();
+}
 
 export default redis;

@@ -6,7 +6,7 @@ import {redisProvider} from "../utils/redisProvider";
 const jwtAuthTool = new jwtProvider();
 const redisAuthTool = new redisProvider();
 
-export const authenticate = async (req: Request, res: Response, next:NextFunction) => {
+export async function authenticate (req: Request, res: Response, next:NextFunction)  {
     // authHeader = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
     const authHeader = req.headers.authorization;
     // startsWith 用來檢查字串是否用指定的輟詞開頭，像是Bearer

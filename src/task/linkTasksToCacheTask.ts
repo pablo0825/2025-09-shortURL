@@ -60,6 +60,7 @@ export async function linkTasksToCacheTask() {
             const id = r.id;
             const {code, long_url, expire_at} = r.payload ?? {};
             const attempts:number = r.attempts;
+
             // 基本防呆
             if (!code || !long_url) {
                 // 處理錯誤
@@ -68,6 +69,7 @@ export async function linkTasksToCacheTask() {
                 // 繼續往下執行
                 continue;
             }
+
             // 檢查嘗試次數的上限
             // 超過5次的話，就把status更新為failed
             if (attempts >= 5) {
