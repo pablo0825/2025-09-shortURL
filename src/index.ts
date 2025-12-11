@@ -14,7 +14,8 @@ import { redirectToLongUrl } from "./controller/link.controllers";
 import { cacheShortUrl } from "./middleware/cacheShortUrl";
 import {loadRbacFromDb} from "./rbac/loadRbacFromDb"
 import redis, { initRedis } from "./redis/redisClient";
-import {Server} from "node:net";
+import {verifyEmailConnection} from "./email/sendEmail";
+import { Server } from 'http';
 
 // import "./task/tasks"
 
@@ -60,24 +61,32 @@ app.use((_req:Request, res:Response) => res.status(404).send("Not Found"));
 async function bootstrap() {
     try {
         // 1. 測試資料庫連線
-        console.log('[1/3] 檢查資料庫連線...');
+        console.log('[1/4] 檢查資料庫連線...');
         await pool.query('SELECT NOW()');
         console.log('✅ 資料庫連線成功');
 
         // 2. 初始化 Redis (使用你原本的函數)
-        console.log('[2/3] 初始化 Redis...');
+        console.log('[2/4] 初始化 Redis...');
         await initRedis();
 
         // 3. 載入 RBAC 權限
-        console.log('[3/3] 載入 RBAC 權限...');
+        console.log('[3/4] 載入 RBAC 權限...');
         await loadRbacFromDb();
 
-        // 4. 啟動伺服器
+        // 4. SMTP是否正常
+        console.log("[4/4] 檢查 SMTP 連線...");
+        await verifyEmailConnection();
+
+        // 5. 啟動伺服器
         server = app.listen(port, () => {
             console.log(`Server is running on http://localhost:${port}`);
         });
     } catch (err) {
         console.error('❌ 啟動失敗:', err);
+
+        if (err instanceof Error) {
+            console.error('錯誤訊息:', err.message);
+        }
 
         // 錯誤退出
         process.exit(1);
@@ -93,6 +102,13 @@ bootstrap().catch((err) => {
 // 優雅關閉處理
 async function gracefulShutdown(signal: string) {
     console.log(`\n收到 ${signal} 信號，正在關閉伺服器...`);
+
+    // 關閉超時，就直接關閉主程式
+    const shutdownTimeout = setTimeout(() => {
+        console.error('關閉超時（30秒），強制退出');
+
+        process.exit(1);
+    }, 3000);
 
     try {
         if (server) {
@@ -127,9 +143,15 @@ async function gracefulShutdown(signal: string) {
 
         console.log('✅ 資源已清理\n');
 
+        // 成功完成所有清理後，清除超時計時器
+        clearTimeout(shutdownTimeout);
+
         process.exit(0);
     } catch (err) {
         console.error('❌ 關閉時發生錯誤:', err);
+
+        // 成功完成所有清理後，清除超時計時器
+        clearTimeout(shutdownTimeout);
 
         process.exit(1);
     }

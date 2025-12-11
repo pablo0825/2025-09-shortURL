@@ -198,5 +198,17 @@ user API:
 權限初始化:
 先把權限從db中拿出來，放到redis中
 
+## 2025/12/09
+
+### user_log table:
+
+| 欄位            | 型別     | 用途                                    |
+|---------------|--------|---------------------------------------|
+| id            | number | 主鍵                                    |
+| user_id       | number | 外鍵                                    |
+| user_nickname | string | 使用者名稱                                 |
+| created_at    | date   | 創建時間                                  |
+| action        | string | 動作，像是忘記密碼、重設密碼、更新個人資料、更新個人頭像、刪除帳號等等動作 |
+| detail        | string | 說明甚麼動作                                |
 
 

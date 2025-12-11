@@ -198,3 +198,28 @@
 --     (2, 11), (2, 12), (2, 13), (2, 14),
 --     (2, 15), (2, 16)
 
+-- 2025/12/10
+-- CREATE TYPE user_log_action_type AS ENUM (
+--     'FORGOT_PASSWORD',
+--     'RESET_PASSWORD',
+--     'UPDATE_PROFILE',
+--     'UPDATE_AVATAR',
+--     'DELETE_ACCOUNT',
+--     'LOGIN',
+--     'LOGOUT',
+--     'REFRESH_TOKEN'
+--     );
+--
+-- CREATE TABLE user_log (
+--     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY ,
+--     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE , -- 外鍵
+--     action user_log_action_type NOT NULL , -- 動作類別
+--     detail TEXT , -- 動作說明
+--     metadata JSONB DEFAULT '{}'::jsonb NOT NULL , -- 機器可用的結構化資料
+--     ip_address INET,
+--     user_agent TEXT,
+--     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+-- );
+
+-- 在user加入兩個欄位，如:
+-- ALTER TABLE users ADD COLUMN reset_password_token TEXT, ADD COLUMN reset_password_expires_at TIMESTAMPTZ;

@@ -5,7 +5,7 @@ import { pool } from "../pool";
 import { Base62 } from "../utils/base62";
 import { Link } from "../type/types";
 import { longUrlSchema } from "../zod/longUrl.schema";
-import { writeLogToDB } from "../utils/witeLogToDB";
+import { writeLogToDB } from "../utils/writeLogToDB";
 import redis from "../redis/redisClient";
 import { isForbiddenTarget } from "../utils/isForbiddenTarget";
 import * as crypto from "node:crypto";
@@ -31,6 +31,7 @@ const OFFSET = BigInt(62 ** (MIN_LENGTH - 1));
 // 建立shortUrl，同時把shortUrl的資料推到link_task中
 export const createShortUrl = async (req: Request, res: Response) => {
     let client: PoolClient | undefined;
+
     try {
         // 驗證url是否存在
        const result = LongUrlSchema.safeParse(req.body?.longUrl);
@@ -91,6 +92,7 @@ export const createShortUrl = async (req: Request, res: Response) => {
 
         // 組成shortURL
         const shortUrl:string = new URL(`/${code}`, SHORT_BASE_URL).toString();
+
         // 寫入log紀錄
         writeLogToDB(req, String(idStr), `新增link ${shortUrl}`);
 
@@ -112,6 +114,9 @@ export const createShortUrl = async (req: Request, res: Response) => {
         // instanceof 檢查物件中是否存在實例
         // 不能用 typeof ，它會回傳object
         const msg = err instanceof Error ? err.message : String(err);
+
+        console.error("[api:link/create] error:", msg, err);
+
         return res.status(500).json({
             ok: false,
             error: msg
@@ -130,6 +135,7 @@ export const redirectToLongUrl = async (req: Request, res: Response) => {
     const raw = req.params.code ?? "";
     // .trim() 移除前後空字串
     const code = raw.trim();
+
     if(!code) {
         return res.status(400).send("short_code是必須的");
     }
@@ -280,6 +286,7 @@ export const redirectToLongUrl = async (req: Request, res: Response) => {
 export const getAllLinks = async (req: Request, res: Response) => {
     try {
         // 保底數字
+        // 1頁，30筆
         const rawPage:number = Number(req.query.page ?? 1);
         const rawPageSize:number = Number(req.query.pageSize ?? 30);
 
@@ -287,16 +294,18 @@ export const getAllLinks = async (req: Request, res: Response) => {
         const page:number = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
         const clamped:number =
             Number.isFinite(rawPageSize) && rawPageSize > 0 ? Math.floor(rawPageSize) : 30;
+        // 限制最大200筆，防止查詢拖垮db
         const pageSize:number = Math.min(Math.max(1, clamped), 200);
 
         // 參數同於true，才是true，不等於的話，就是false
-        const includeExpired:boolean = req.query.inCludeExoired === "true";
-        const includeInactive:boolean = req.query.inActive === "true";
+        const includeExpired = req.query.includeExpired === "true";
+        const includeInactive = req.query.includeInactive === "true";
 
         const offset:number = (page - 1) * pageSize;
 
         // 動態條件
         const condition:string[] = [];
+
         if(!includeExpired) {
             // 過濾掉過期的link
             condition.push(`expire_at > now()`);
@@ -329,6 +338,7 @@ export const getAllLinks = async (req: Request, res: Response) => {
                 isActive: r.is_active as boolean,
             }
         });
+
         // 200 表示伺服器已完成請求。沒有改變伺服器的狀態
         return res.status(200).json({
             ok: true,
@@ -340,6 +350,8 @@ export const getAllLinks = async (req: Request, res: Response) => {
         })
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+
+        console.error("[api:link/getAllLink] error:", msg, err);
 
         return res.status(500).json({
             ok: false,
@@ -367,6 +379,7 @@ export const deleteLink = async (req: Request, res: Response) => {
         // trim 前掉字串的前後空白
         // 改用字串取得參數，避免字串長度超過number
         const id = (req.params.id ?? "").trim();
+
         // 檢查id是否為正整數
         if (!/^\d+$/.test(id)) {
             return res.status(400).json({
@@ -377,6 +390,7 @@ export const deleteLink = async (req: Request, res: Response) => {
 
         // id::BIGINT 把字串的型別強制轉成bigint
         const query = await pool.query(`DELETE FROM links WHERE id = $1::BIGINT`, [id]);
+
         // rowCount會返回0或1。1表示有查詢到該筆資料，而0則表示沒有找到資料
         // 檢驗數據是否真的有被刪除
         if(query.rowCount === 0) {
@@ -393,38 +407,57 @@ export const deleteLink = async (req: Request, res: Response) => {
         // 但這邊還是改回 200
         return res.status(200).json({
             ok: true,
-            msg:`已刪除 ${id}`
+            message:`已刪除 ${id}`
         })
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+
+        console.error("[api:link/delete] error:", msg, err);
+
         // 500 表示伺服器遇到錯誤，無法完成請求，是通用的錯誤處理代碼
         return res.status(500).json({
             ok: false,
-            err: msg
+            error: msg
         })
     }
 }
 
 // [api] 停用link
 // [2025/11/06完成] 補上停用link時，要刪掉redis中的快取紀錄
+// 樂觀更新：先嘗試更新，成功就結束，失敗的話，在來檢查原因
 export const deactivateLink = async (req: Request, res: Response) => {
     try {
+        // .trim() 移除字串開頭、結尾的空白
         const id = (req.params.id ?? "").trim();
 
+        // /^\d+$/ 表示從頭到尾，都要由數字組成
         if (!/^\d+$/.test(id)) {
             return res.status(400).json({
                 ok: false,
                 err: "id 必須是正整數"
             })
         }
+        // 跟上面相同功能的寫法
+        // isNaN 判斷傳入的是否為數字，為數字就往下執行，非數字就執行方法內容
+        // isFinite 判斷傳入的是否為有限數
+        // 判斷數字是否小於等於0
+        // if (isNaN(Number(id)) || !Number.isFinite(Number(id)) || Number(id) <= 0) {
+        //     return res.status(400).json({
+        //         ok: false,
+        //         err: "id 必須是正整數"
+        //     })
+        // }
 
         const query = await pool.query<{ code:string }>(`UPDATE links SET is_active = FALSE WHERE id = $1::BIGINT AND expire_at > now() AND is_active = TRUE RETURNING code;`, [id]);
+
         // 成功更新
         if(query.rowCount === 1) {
             // 寫入log紀錄
             writeLogToDB(req, id, `${id} link停用`);
+
             // 刪除快取
             await redis.del(`short:${query.rows[0].code}`);
+
             return res.status(200).json({
                 ok: true,
                 msg: `${id} 已停用`
@@ -432,17 +465,17 @@ export const deactivateLink = async (req: Request, res: Response) => {
         }
 
         // 出現錯誤，開始第二段查詢，找出錯誤原因，並回傳正確的錯誤訊息
-        const query_2 = await pool.query<{ is_active: boolean; expire_at: string }>(`SELECT is_active, expire_at FROM links WHERE id = $1::BIGINT LIMIT 1;`, [id]);
+        const checkQuery = await pool.query<{ is_active: boolean; expire_at: string }>(`SELECT is_active, expire_at FROM links WHERE id = $1::BIGINT LIMIT 1;`, [id]);
 
         // 不存在
-        if(query_2.rowCount === 0) {
+        if(checkQuery.rowCount === 0) {
             return res.status(404).json({
                 ok: false,
                 err:`${id} 不存在`
             })
         }
 
-        const { is_active, expire_at } = query_2.rows[0];
+        const { is_active, expire_at } = checkQuery.rows[0];
 
         // 已停用
         if (!is_active) {
@@ -462,13 +495,16 @@ export const deactivateLink = async (req: Request, res: Response) => {
 
         return res.status(409).json({
             ok: false,
-            msg: `${id} 無法停用`
+            message: `${id} 無法停用(未知錯誤)`
         })
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+
+        console.error("[api:link/deactivate] error:", msg, err);
+
         return res.status(500).json({
             ok: false,
-            err: msg
+            error: msg
         })
     }
 }

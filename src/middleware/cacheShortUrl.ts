@@ -3,7 +3,7 @@ import type { Request, Response, NextFunction } from "express";
 import redis from "../redis/redisClient";
 import { longUrlSchema } from "../zod/longUrl.schema";
 import { isForbiddenTarget } from "../utils/isForbiddenTarget";
-import { writeLogToDB } from "../utils/witeLogToDB";
+import { writeLogToDB } from "../utils/writeLogToDB";
 
 const LongUrlSchema = longUrlSchema({
     shortDomain: process.env.SHORT_BASE_URL, // e.g. "sho.rt"
