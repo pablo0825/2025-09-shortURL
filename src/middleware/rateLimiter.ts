@@ -98,6 +98,6 @@ export const resetPasswordLimiter = createRedisRateLimiter({
     windowMs: 15 * 60 * 1000,
     max: 5,
     prefix: 'rl:reset-password:',
-    message: '登入嘗試次數過多，請 15 分鐘後再試',
+    message: '重設密碼失敗次數過多，帳號已暫時鎖定 15 分鐘',
     skipSuccessfulRequests: true, // 登入成功不計入限制
 })

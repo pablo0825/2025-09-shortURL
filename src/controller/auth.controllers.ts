@@ -11,6 +11,7 @@ import {handleAccessTokenBlackList} from "../utils/handleAccessTokenBlackList";
 import {sendEmail} from "../email/sendEmail";
 import {writeUserLogToDB} from "../utils/writeUserLogToDB";
 import {UserLogActionEnum} from "../enum/userLogAction.enum";
+import {checkResetLock, clearResetFailures, recordResetFailure} from "../utils/handlePasswordResetFailure"
 
 const jwtAuthTool = new jwtProvider();
 const redisAuthTool = new redisProvider();
@@ -822,6 +823,7 @@ export const resetPassword = async (req:Request, res:Response) => {
     let nickname:string;
     let email:string;
     let oldPasswordHash:string;
+    let client: PoolClient | undefined;
 
     const result = restPasswordSchema.safeParse(req.body);
 
@@ -836,18 +838,29 @@ export const resetPassword = async (req:Request, res:Response) => {
 
     const {resetToken, newPassword} = result.data;
 
+    // 產生token雜湊值
     const hashToken:string = crypto.createHash("sha256").update(resetToken).digest("hex");
 
+    // 從資料庫獲得一條單獨的連線
+    client = await pool.connect();
+
     try {
+        // [交易] 開始
+        await client.query('BEGIN');
+
         // 檢查user是否存在
-        const user = await pool.query<{
+        // 上鎖 (FOP UPDATE)
+        const user = await client.query<{
             id:number;
             nickname:string;
             email:string;
             password_hash:string;
-        }>('SELECT id, nickname, email, password_hash FROM users WHERE reset_password_token = $1 AND reset_password_expires_at > now() LIMIT 1', [hashToken]);
+        }>('SELECT id, nickname, email, password_hash FROM users WHERE reset_password_token = $1 AND reset_password_expires_at > now() LIMIT 1 FOR UPDATE ', [hashToken]);
 
         if (user.rowCount === 0) {
+            // [交易] 失敗，結束
+            await client.query('ROLLBACK');
+
             return res.status(400).json({
                 ok: false,
                 error: "無效或已過期的重設連結"
@@ -859,10 +872,35 @@ export const resetPassword = async (req:Request, res:Response) => {
         email = user.rows[0].email;
         oldPasswordHash = user.rows[0].password_hash;
 
+        // [標註] 不使用，有更好的方法
+        // // 檢查user是否被鎖住
+        // const lock = await checkResetLock(userId);
+        //
+        // if (lock.locked) {
+        //     const minutes = Math.ceil(lock.remainingSeconds / 60);
+        //
+        //     // [交易] 失敗，結束
+        //     await client.query('ROLLBACK');
+        //
+        //     return res.status(423).json({
+        //         ok: false,
+        //         error: `密碼重設嘗試次數過多，帳號已暫時鎖定，請約 ${minutes} 分鐘後再試`
+        //     })
+        //
+        // }
+
         // 比較新舊密碼是否相同
         const isSamePassword = await bcrypt.compare(newPassword, oldPasswordHash);
 
         if (isSamePassword) {
+            const count = await recordResetFailure(userId);
+
+            // 你也可以在這裡額外 log
+            console.warn(`[resetPassword] user ${userId} 新舊密碼相同，失敗次數第 ${count} 次`);
+
+            // [交易] 失敗，結束
+            await client.query('ROLLBACK');
+
             return res.status(400).json({
                 ok: false,
                 error: "新密碼不能與舊密碼相同",
@@ -872,10 +910,10 @@ export const resetPassword = async (req:Request, res:Response) => {
         const newPasswordHash:string = await bcrypt.hash(newPassword, 10);
 
         // 更新密碼
-        await pool.query('UPDATE users SET password_hash = $1, reset_password_token = NULL, reset_password_expires_at = NULL WHERE id = $2', [newPasswordHash, userId]);
+        await client.query('UPDATE users SET password_hash = $1, reset_password_token = NULL, reset_password_expires_at = NULL WHERE id = $2', [newPasswordHash, userId]);
 
         // 登出所有裝置的帳號
-        await pool.query('UPDATE refresh_token SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [userId]);
+        await client.query('UPDATE refresh_token SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [userId]);
 
         // 更新user_log
         await writeUserLogToDB(userId, UserLogActionEnum.RESET_PASSWORD, {
@@ -887,8 +925,15 @@ export const resetPassword = async (req:Request, res:Response) => {
             userAgent: req.get("user-agent") ?? null
         });
 
+        // [交易] 成功，結束
+        await client.query('COMMIT');
+
+        // // 清除失敗紀錄
+        // await clearResetFailures(userId);
+
         const resetAt = new Date().toLocaleString("zh-TW", { timeZone: "Asia/Taipei" });
 
+        // [標註] 我覺得這邊可以優化
         // HTML 郵件內容（使用反引號）
         const html = `
             <h2>重設密碼</h2>
@@ -913,6 +958,16 @@ export const resetPassword = async (req:Request, res:Response) => {
             message: "密碼已成功重設，請使用新密碼重新登入",
         });
     } catch (err) {
+        if (client) {
+            // 多包一層try catch是為了讓finally可以被執行
+            // 如果沒有包的話，會停留在catch上
+            // 這樣就不能釋放pool的連線資源
+            try {
+                // [交易] 失敗，結束
+                await client.query('ROLLBACK');
+            } catch {}
+        }
+
         const msg = err instanceof Error ? err.message : String(err);
 
         console.error("[api:auth/resetPassword] error:", msg, err);
@@ -921,5 +976,8 @@ export const resetPassword = async (req:Request, res:Response) => {
             ok: false,
             error: "系統錯誤"
         });
+    } finally {
+        // [交易] 結束，釋放資源
+        if (client) client.release();
     }
 }

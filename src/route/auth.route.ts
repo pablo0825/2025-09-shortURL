@@ -1,8 +1,8 @@
 // auth.route.ts
 import express from "express";
-import {register, login, refresh, logout, logoutAll, logoutDevice, forgotPassword} from "../controller/auth.controllers";
+import {register, login, refresh, logout, logoutAll, logoutDevice, forgotPassword, resetPassword} from "../controller/auth.controllers";
 import {authenticate} from "../middleware/authenticateTokents"
-import {forgotPasswordLimiter, loginLimiter, registerLimiter, generalApiLimiter} from "../middleware/rateLimiter"
+import {forgotPasswordLimiter, loginLimiter, registerLimiter, generalApiLimiter, resetPasswordLimiter} from "../middleware/rateLimiter"
 
 const router = express.Router();
 
@@ -12,6 +12,7 @@ router.post("/refresh", generalApiLimiter, refresh);
 router.post("/logout", logout);
 router.post("/logout-all", authenticate, logoutAll);
 router.post("/devices/:tokenId", authenticate, logoutDevice);
-router.post("/forgotPassword", forgotPasswordLimiter, forgotPassword);
+router.post("/forgot-password", forgotPasswordLimiter, forgotPassword);
+router.post("/reset-password", resetPasswordLimiter, resetPassword);
 
 export default router;
