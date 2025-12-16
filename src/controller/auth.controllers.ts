@@ -234,6 +234,7 @@ export const login = async (req: Request, res: Response) => {
         }
 
         // 準備設備資料
+        // ?? 左邊為空，則用右邊的值
         const userAgent = req.get("user-agent") ?? null;
         const userIp = req.ip; // [標註] 這種寫法可能會有問題，但先這樣
         const lastUsedAt = new Date();
@@ -893,10 +894,10 @@ export const resetPassword = async (req:Request, res:Response) => {
         const isSamePassword = await bcrypt.compare(newPassword, oldPasswordHash);
 
         if (isSamePassword) {
-            const count = await recordResetFailure(userId);
-
-            // 你也可以在這裡額外 log
-            console.warn(`[resetPassword] user ${userId} 新舊密碼相同，失敗次數第 ${count} 次`);
+            // const count = await recordResetFailure(userId);
+            //
+            // // 你也可以在這裡額外 log
+            // console.warn(`[resetPassword] user ${userId} 新舊密碼相同，失敗次數第 ${count} 次`);
 
             // [交易] 失敗，結束
             await client.query('ROLLBACK');
@@ -910,7 +911,7 @@ export const resetPassword = async (req:Request, res:Response) => {
         const newPasswordHash:string = await bcrypt.hash(newPassword, 10);
 
         // 更新密碼
-        await client.query('UPDATE users SET password_hash = $1, reset_password_token = NULL, reset_password_expires_at = NULL WHERE id = $2', [newPasswordHash, userId]);
+        await client.query('UPDATE users SET password_hash = $1, last_password_reset_at = now(), reset_password_token = NULL, reset_password_expires_at = NULL WHERE id = $2', [newPasswordHash, userId]);
 
         // 登出所有裝置的帳號
         await client.query('UPDATE refresh_token SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [userId]);
@@ -923,13 +924,13 @@ export const resetPassword = async (req:Request, res:Response) => {
             },
             ipAddress: req.ip,
             userAgent: req.get("user-agent") ?? null
-        });
+        }, client);
 
         // [交易] 成功，結束
         await client.query('COMMIT');
 
-        // // 清除失敗紀錄
-        // await clearResetFailures(userId);
+        // 清除失敗紀錄
+        await clearResetFailures(userId);
 
         const resetAt = new Date().toLocaleString("zh-TW", { timeZone: "Asia/Taipei" });
 

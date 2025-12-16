@@ -71,7 +71,7 @@ function createRedisRateLimiter (config: DailyRateLimitConfig) {
             if (currentCount > config.max) {
                 return res.status(429).json({
                     ok: false,
-                    error: config.message || '今日請求次數已達上限',
+                    error: config.message || '今日建立短網址已達上限（100 次），請明天再試',
                     resetAt: endOfDay.toISOString(),
                 });
             }

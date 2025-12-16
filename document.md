@@ -164,6 +164,7 @@ user API:
 | 1         | auth   | 登出所有裝置      | logout_all    | 允許使用者強制登出所有裝置                               |
 | 1         | auth   | 登出指定裝置      | logout_device | 允許使用者登出指定裝置                                 |
 
+ps:第三方登入還沒處理
 
 有授權才可使用
 
@@ -212,3 +213,14 @@ user API:
 | detail        | string | 說明甚麼動作                                |
 
 
+## 2025/12/15
+
+auth api 大多已經完成，如下，剩下驗證email的api，等完成user, admin的api在回來處理。
+
+user api:
+1. 讀取個人資料
+2. 更新個人資料
+3. 更新個人頭像
+4. 更新密碼
+5. 2fa驗證
+6. 刪除帳號

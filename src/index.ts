@@ -8,14 +8,15 @@ import type { Request, Response, NextFunction } from 'express';
 import cookieParser from 'cookie-parser';
 // 引入變數
 import { pool } from "./pool";
-import router from "./route/link.route";
-import authRoute from "./route/auth.route";
+// import router from "./route/link.route";
+// import authRoute from "./route/auth.route";
 import { redirectToLongUrl } from "./controller/link.controllers";
 import { cacheShortUrl } from "./middleware/cacheShortUrl";
 import {loadRbacFromDb} from "./rbac/loadRbacFromDb"
 import redis, { initRedis } from "./redis/redisClient";
 import {verifyEmailConnection} from "./email/sendEmail";
 import { Server } from 'http';
+import {initRedisRateLimiter} from "./middleware/rateLimiter";
 
 // import "./task/tasks"
 
@@ -30,8 +31,8 @@ const port = Number(process.env.PORT ?? 3001);
 // 存放Server實例，以便稍後關閉
 let server:Server;
 
-app.use("/api/link", router);
-app.use("/api/auth", authRoute);
+// app.use("/api/link", router);
+// app.use("/api/auth", authRoute);
 //
 app.get("/health", async (_req:Request, res:Response) => {
     try {
@@ -53,11 +54,6 @@ app.get("/health", async (_req:Request, res:Response) => {
     }
 });
 
-// 加入快取作為中介層
-app.get("/:code", cacheShortUrl, redirectToLongUrl);
-
-app.use((_req:Request, res:Response) => res.status(404).send("Not Found"));
-
 async function bootstrap() {
     try {
         // 1. 測試資料庫連線
@@ -69,6 +65,19 @@ async function bootstrap() {
         console.log('[2/4] 初始化 Redis...');
         await initRedis();
 
+        // ✅ Redis ready 後：初始化 limiter（此時才會 new RedisStore）
+        const { initRedisRateLimiter } = await import("./middleware/rateLimiter");
+        initRedisRateLimiter();
+        console.log("✅ RateLimiters 初始化完成");
+
+        // // ✅ 在 Redis 連線完成後，再 import routes
+        const { default: router } = await import("./route/link.route");
+        const { default: authRoute } = await import("./route/auth.route");
+
+        //
+        app.use("/api/link", router);
+        app.use("/api/auth", authRoute);
+
         // 3. 載入 RBAC 權限
         console.log('[3/4] 載入 RBAC 權限...');
         await loadRbacFromDb();
@@ -76,6 +85,11 @@ async function bootstrap() {
         // 4. SMTP是否正常
         console.log("[4/4] 檢查 SMTP 連線...");
         await verifyEmailConnection();
+
+        // 加入快取作為中介層
+        app.get("/:code", cacheShortUrl, redirectToLongUrl);
+
+        app.use((_req:Request, res:Response) => res.status(404).send("Not Found"));
 
         // 5. 啟動伺服器
         server = app.listen(port, () => {

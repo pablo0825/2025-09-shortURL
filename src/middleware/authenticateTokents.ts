@@ -12,6 +12,7 @@ export async function authenticate (req: Request, res: Response, next:NextFuncti
     // startsWith 用來檢查字串是否用指定的輟詞開頭，像是Bearer
     if (!authHeader?.startsWith("Bearer ")) {
         return res.status(401).json({
+            ok: false,
             error:"headers 中的 authorization 不正確"
         })
     }
@@ -21,6 +22,7 @@ export async function authenticate (req: Request, res: Response, next:NextFuncti
     const accessToken = authHeader && authHeader.split(" ")[1];
     if (!accessToken) {
         return res.status(401).json({
+            ok: false,
             error:"未提供 accessToken"
         })
     }

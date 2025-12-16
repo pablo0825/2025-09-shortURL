@@ -1,11 +1,12 @@
 // link.route.ts
 import express from "express";
 import { createShortUrl, getAllLinks, deleteLink, deactivateLink } from "../controller/link.controllers"
-import { createLinkLimiter } from "../middleware/limitCreateByIp";
 import {checkPermission} from "../middleware/checkPermission"
-import {generalApiLimiter} from "../middleware/rateLimiter"
+import {getRateLimiters} from "../middleware/rateLimiter"
 
 const router = express.Router();
+
+const {generalApiLimiter, createLinkLimiter} = getRateLimiters();
 
 router.post("/", checkPermission("link", "create"), createLinkLimiter, createShortUrl);
 router.get("/", checkPermission("link", "list"), generalApiLimiter, getAllLinks);
