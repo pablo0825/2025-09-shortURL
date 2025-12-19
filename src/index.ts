@@ -6,16 +6,15 @@ import express from 'express';
 // import path from 'path';
 import type { Request, Response, NextFunction } from 'express';
 import cookieParser from 'cookie-parser';
+import { Server } from 'http';
+import path from "path";
 // 引入變數
 import { pool } from "./pool";
-// import router from "./route/link.route";
-// import authRoute from "./route/auth.route";
 import { redirectToLongUrl } from "./controller/link.controllers";
 import { cacheShortUrl } from "./middleware/cacheShortUrl";
 import {loadRbacFromDb} from "./rbac/loadRbacFromDb"
 import redis, { initRedis } from "./redis/redisClient";
 import {verifyEmailConnection} from "./email/sendEmail";
-import { Server } from 'http';
 import {initRedisRateLimiter} from "./middleware/rateLimiter";
 
 // import "./task/tasks"
@@ -24,6 +23,11 @@ const app = express();
 
 app.use(express.json());
 app.use(cookieParser());
+// 公開偽裝後的資料夾路經，讓/static指定uploads資料夾
+// express.static 處理靜態檔案的讀取與傳送
+// path.join 把分隔符的兩個path連接起來
+// process.cwd() 目前程式執行的跟目錄
+app.use("/static", express.static(path.join(process.cwd(), "uploads")));
 
 const port = Number(process.env.PORT ?? 3001);
 // console.log(process.env.PORT);
@@ -31,9 +35,6 @@ const port = Number(process.env.PORT ?? 3001);
 // 存放Server實例，以便稍後關閉
 let server:Server;
 
-// app.use("/api/link", router);
-// app.use("/api/auth", authRoute);
-//
 app.get("/health", async (_req:Request, res:Response) => {
     try {
         // 確認有連到資料庫

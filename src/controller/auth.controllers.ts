@@ -84,7 +84,11 @@ export const register = async (req: Request, res: Response) => {
         await client.query('BEGIN');
 
         // 把email, password, nickname等資料存到user table
-        const user = await client.query<{id:number, email:string, nickname:string}>('INSERT INTO users(email, password_hash, nickname) VALUES ($1, $2, $3) RETURNING id, email, nickname', [email, passwordHash, nickname]);
+        const user = await client.query<{
+            id:number,
+            email:string,
+            nickname:string
+        }>('INSERT INTO users(email, password_hash, nickname) VALUES ($1, $2, $3) RETURNING id, email, nickname', [email, passwordHash, nickname]);
 
         const userId:number = user.rows[0].id;
         const roleId:number = role.rows[0].id;
@@ -929,8 +933,8 @@ export const resetPassword = async (req:Request, res:Response) => {
         // [交易] 成功，結束
         await client.query('COMMIT');
 
-        // 清除失敗紀錄
-        await clearResetFailures(userId);
+        // // 清除失敗紀錄
+        // await clearResetFailures(userId);
 
         const resetAt = new Date().toLocaleString("zh-TW", { timeZone: "Asia/Taipei" });
 

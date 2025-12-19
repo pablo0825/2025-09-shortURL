@@ -168,32 +168,38 @@ ps:第三方登入還沒處理
 
 有授權才可使用
 
-| parent_id | module | name         | type             | description                                 |
-|-----------|--------|--------------|------------------|---------------------------------------------|
-| NULL      | link   | 短網址服務        | N/A              | 短網址服務的父節點                                   |
-| 2         | link   | 建立link       | create           | 允許建立短網址                                     |
-| 2         | link   | 查詢link列表     | list             | 允許查詢使用者擁有的link list                         |
-| 2         | link   | 查詢link詳情     | read_stats       | 允許使用者查詢單一link的統計資料                          |
+| parent_id | module | name         | type             | description                           |
+|-----------|--------|--------------|------------------|---------------------------------------|
+| NULL      | link   | 短網址服務        | N/A              | 短網址服務的父節點                             |
+| 2         | link   | 建立link       | create           | 允許建立短網址                               |
+| 2         | link   | 查詢link列表     | list             | 允許查詢使用者擁有的link list                   |
+| 2         | link   | 查詢link詳情     | read_stats       | 允許使用者查詢單一link的統計資料                    |
 | 2         | link   | 更新link資料     | update           | 允許使用者修改單一link的資料，如: longURL, 社交標題, 社交縮圖, 別名 |
-| 2         | link   | 停用link       | disable          | 允許使用者將單一link設為停用狀態                          |
-| 2         | link   | 刪除link       | delete           | 允許使用者永久刪除單一link                             |
-| 2         | link   | 下載QR Code    | export           | 允許使用者下載單一link的QR Code                       |
-| NULL      | user   | 使用者資料        | N/A              | 使用者資料的父節點                                   |
-| 3         | user   | 讀取個人資料       | read             | 允許使用者讀取自己的完整資料                              |
-| 3         | user   | 更新個人資料       | update_profile   | 允許使用者更新自己的資料                                |
-| 3         | user   | 更新個人頭像       | update_avatar    | 允許使用者更新自己的頭像                                |
-| 3         | user   | 更新密碼         | update_password  | 允許使用者更新自己的密碼                                |
-| 3         | user   | 2fa驗證        | manage_2fa       | 允許使用者啟用、停用與管理自己的兩步驟驗證設定                     |
-| 3         | user   | 刪除帳號         | soft_delete      | 允許使用者刪除自己的帳號                                |
-| NULL      | admin  | 管理員控制        | N/A              | 管理員控制的父節點                                   |
-| 4         | admin  | 查詢所有使用者列表    | list_user        | 允許管理員取得所有使用者的列表                             |
-| 4         | admin  | 軟刪除使用者       | soft_delete_user | 允許管理員將使用者帳號停用                               |
-| 4         | admin  | 恢復使用者        | restore_user     | 允許管理員恢復使用者帳號                                |
-| 4         | admin  | 設定角色權限       | manage_role      | 允許管理員編輯角色的權限                                |
-| 4         | admin  | 分配角色給使用者     | assign_role      |                                             |
-| 4         | admin  | 查詢所有link列表   | read_all_link    | 允許管理員查詢所有使用者的link                           |
-| 4         | admin  | 停用任何使用者的link | disable_any_link | 允許管理員停用任何使用者的link                           |
-| 4         | admin  | 查看統計資料       | view_stats       | 允許管理員查看儀表板和系統運行數據                           |
+| 2         | link   | 停用link       | disable          | 允許使用者將單一link設為停用狀態                    |
+| 2         | link   | 刪除link       | delete           | 允許使用者永久刪除單一link                       |
+| 2         | link   | 下載QR Code    | export           | 允許使用者下載單一link的QR Code                 |
+| NULL      | user   | 使用者資料        | N/A              | 使用者資料的父節點                             |
+| 3         | user   | 讀取個人資料       | read_profile     | 允許使用者讀取自己的完整資料                        |
+| 3         | user   | 更新個人資料       | update_profile   | 允許使用者更新自己的資料                          |
+| 3         | user   | 更新個人頭像       | update_avatar    | 允許使用者更新自己的頭像                          |
+| 3         | user   | 刪除個人頭像       | delete_avatar    | 允許使用者更新自己的密碼                          |
+| 3         | user   | 更新密碼         | update_password  | 允許使用者更新自己的密碼                          |
+| 3         | user   | 啟用2fa        | setup_2fa        | 允許使用者啟用自己的兩步驟驗證設定                     |
+| 3         | user   | 驗證2fa        | verify_2fa       | 允許使用者驗證自己的兩步驟驗證設定                     |
+| 3         | user   | 停用2fa        | disable_2fa      | 允許使用者停用自己的兩步驟驗證設定                     |
+| 3         | user   | 刪除帳號         | soft_delete      | 允許使用者刪除自己的帳號                          |
+| 3         | user   | 讀取登陸紀錄       | read_sessions    | 允許使用者刪除自己的帳號                          |
+| 3         | user   | 登出所有裝置      | logout_all    | 允許使用者強制登出所有裝置                               |
+| 3         | user   | 登出指定裝置      | logout_device | 允許使用者登出指定裝置                                 |
+| NULL      | admin  | 管理員控制        | N/A              | 管理員控制的父節點                             |
+| 4         | admin  | 查詢所有使用者列表    | list_user        | 允許管理員取得所有使用者的列表                       |
+| 4         | admin  | 軟刪除使用者       | soft_delete_user | 允許管理員將使用者帳號停用                         |
+| 4         | admin  | 恢復使用者        | restore_user     | 允許管理員恢復使用者帳號                          |
+| 4         | admin  | 設定角色權限       | manage_role      | 允許管理員編輯角色的權限                          |
+| 4         | admin  | 分配角色給使用者     | assign_role      |                                       |
+| 4         | admin  | 查詢所有link列表   | read_all_link    | 允許管理員查詢所有使用者的link                     |
+| 4         | admin  | 停用任何使用者的link | disable_any_link | 允許管理員停用任何使用者的link                     |
+| 4         | admin  | 查看統計資料       | view_stats       | 允許管理員查看儀表板和系統運行數據                     
 
 
 權限初始化:
@@ -218,9 +224,21 @@ ps:第三方登入還沒處理
 auth api 大多已經完成，如下，剩下驗證email的api，等完成user, admin的api在回來處理。
 
 user api:
-1. 讀取個人資料
-2. 更新個人資料
-3. 更新個人頭像
-4. 更新密碼
-5. 2fa驗證
-6. 刪除帳號
+1. 讀取個人資料 getMyProfile
+2. 更新個人資料 updateMyProfile
+3. 更新個人頭像 updateMyAvatar
+4. 刪除個人頭像 deleteMyAvatar
+5. 更新密碼 changeMyPassword 用post
+6. 設定2fa驗證 setup2fa
+7. 驗證2fa驗證 verify2fa
+8. 停用2fa驗證 disable2fa
+9. 刪除帳號 softDeleteMyAccount
+10. 讀取登入紀錄 getMySessionsList
+11. 登出指定裝置 logoutDevice
+12. 登出全部裝置 logoutAll
+
+ps: logoutAll, logoutDevice等，目前放在auth route中，之後要搬到user route裡面。
+
+要修改suers table的欄位
+
+

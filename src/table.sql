@@ -223,3 +223,6 @@
 
 -- 在user加入兩個欄位，如:
 -- ALTER TABLE users ADD COLUMN reset_password_token TEXT, ADD COLUMN reset_password_expires_at TIMESTAMPTZ;
+
+-- 2025/12/19
+ALTER TABLE users ADD COLUMN avatar_updated_at TIMESTAMPTZ;
