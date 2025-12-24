@@ -60,6 +60,7 @@ export async function deleteUserOldAvatarTask () {
 
             const userDir:string = path.join(uploadsAvatarsRoot, String(u.id));
 
+            // 現在的key
             const filename:string = path.basename(avatarKey);
 
             try {

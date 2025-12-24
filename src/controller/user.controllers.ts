@@ -35,12 +35,12 @@ export const updateMyProfile = async (req: Request, res: Response) => {
 }
 
 export const updateMyAvatar = async (req: Request, res: Response) => {
-    const userIdStr:string | undefined = req.user?.id;
-    const userIdNum:number = Number(req.user?.id);
-    const userEmail:string | undefined  = req.user?.email;
+    const userIdNum = Number(req.user?.id);
+    const userIdStr = String(userIdNum); //
     let client: PoolClient | undefined;
+    let oldAvatarKey: string | null = null;
 
-    if (!userIdStr || Number.isNaN(userIdNum) || !userEmail) {
+    if (Number.isNaN(userIdNum)) {
         return res.status(401).json({
             ok: false,
             error: "未登入"
@@ -71,18 +71,18 @@ export const updateMyAvatar = async (req: Request, res: Response) => {
     // 用uuid4創造一個隨機的web檔名稱
     const filename = `${uuid4()}.webp`;
     // 檢查路徑是否合法，合法的話，回傳/2025-shortURL/uploads/avatars/user-99/550e8400-e29b.web
-    const absFilePath:string = path.join(userDir, filename);
+    const absFilePath:string = safeJoin(userDir, filename);
 
     // 對外搭配用的url
     const avatarUrl:string = `/static/avatars/${userIdStr}/${filename}`;
 
-    // 從資料庫獲得一條單獨的連線
-    client = await pool.connect();
-
     try {
         // 因為是memoryStorage(記憶體儲存)模式，所以從buffer讀取檔案
         // 以下程式碼是專門用來處理使用者頭像的程式碼，sharp還可以有更多參數計進行調整
-        const webBuffer = await sharp(req.file.buffer)
+        const webBuffer = await sharp(req.file.buffer, {
+            // 限制像素輸入
+            limitInputPixels: 20_000_000,
+        })
                 // 自動旋轉，手機拍出的照片有可能是倒一邊，所以需要進行旋轉
                 .rotate()
                 // 將圖片調整到指定的長寬比
@@ -96,14 +96,13 @@ export const updateMyAvatar = async (req: Request, res: Response) => {
         // 把memory中的buffer，寫入到指定的資料夾中
         await fs.writeFile(absFilePath, webBuffer);
 
+        // 從資料庫獲得一條單獨的連線
+        client = await pool.connect();
         // [交易] 開始
         await client.query('BEGIN');
 
-        const user = await client.query<{
-            id:number;
-            avatar_key:string;
-        }>('SELECT id, avatar_key FROM users WHERE id = $1 AND email = $2', [userIdNum, userEmail]);
-
+        // 用FOR UPDATE 鎖定使用者，避免併發修改
+        const user = await client.query<{avatar_key: string}>('SELECT avatar_key FROM users WHERE id = $1 FOR UPDATE', [userIdNum]);
 
         if (user.rowCount === 0) {
             // [交易] 失敗，結束
@@ -118,10 +117,11 @@ export const updateMyAvatar = async (req: Request, res: Response) => {
             })
         }
 
-        const oldAvatarUrl:string | undefined = user.rows[0].avatar_key;
+        oldAvatarKey = user.rows[0].avatar_key;
 
         // 把avatar的路徑，更新到users table的avatar_key欄位中
-        const updateResult = await client.query('UPDATE users SET avatar_key = $1 WHERE id = $2 AND email = $3', [avatarUrl, userIdNum, userEmail]);
+        // 加入頭像的更新時間
+        const updateResult = await client.query('UPDATE users SET avatar_key = $1, avatar_updated_at = now() WHERE id = $2', [avatarUrl, userIdNum]);
 
         if (updateResult.rowCount === 0) {
             // [交易] 失敗，結束
@@ -143,6 +143,7 @@ export const updateMyAvatar = async (req: Request, res: Response) => {
                 name: req.user?.name,
                 filename: filename,
                 url: avatarUrl,
+                type: req.avatarFileType
             },
             ipAddress: req.ip,
             userAgent: req.get("user-agent") ?? null
@@ -151,14 +152,31 @@ export const updateMyAvatar = async (req: Request, res: Response) => {
         // [交易] 成功，結束
         await client.query('COMMIT');
 
-        // 刪除舊檔
-        // 檢查oldAvatarUrl的路徑開頭，是否等於/static/avatars/，ture，執行程式碼，false，則跳過
-        if (oldAvatarUrl && oldAvatarUrl.startsWith("/static/avatars/")) {
+        // // 5. 刪除舊檔 (同步執行，會增加回應時間，但保證硬碟乾淨)
+        // // 只有在 COMMIT 成功後才執行
+        // if (oldAvatarKey && oldAvatarKey.startsWith(`/static/avatars/${userIdStr}/`)) {
+        //     const oldRelPath = oldAvatarKey.replace("/static", "uploads");
+        //     const oldAbsPath = path.join(process.cwd(), oldRelPath);
+        //
+        //     // 雙重檢查：確保要刪除的檔案真的位於 avatars 目錄下
+        //     const resolvedOld = path.resolve(oldAbsPath);
+        //     const resolvedBase = path.resolve(allowedBase) + path.sep;
+        //
+        //     if (resolvedOld.startsWith(resolvedBase)) {
+        //         // 不等待它完成 (Fire and Forget) 也可以，看您是否在乎捕捉刪除錯誤
+        //         // 這裡選擇 await 確保乾淨
+        //         await fs.unlink(resolvedOld).catch(err => console.warn("刪除舊檔失敗:", err));
+        //     }
+        // }
+
+        // [標記] 未完成
+        // 刪除舊的頭像
+        if (oldAvatarKey  && oldAvatarKey.startsWith(`/static/avatars/${userIdStr}/`)) {
             // process.cwd() 獲取當前目錄的路徑
             // path.join 合併路徑
             // .replac 把oldAvatarURL的偽裝的 static 替換成 真實的 uploads
             // 回傳，如:/2025-shortURL/uploads/avatars/user-99/550e8400-e29b.web
-            const oldAbs:string = path.join(process.cwd(), oldAvatarUrl?.replace("/static", "uploads"));
+            const oldAbs:string = path.join(process.cwd(), oldAvatarKey?.replace("/static", "uploads"));
 
             ///2025-shortURL/uploads/avatars/
             const allowedBase:string = path.join(process.cwd(), "uploads", "avatars") + path.sep;

@@ -12,6 +12,8 @@ declare global {
                 name: string;
                 role: string;
             };
+            //
+            avatarFileType?: FileTypeResult;
         }
     }
 }

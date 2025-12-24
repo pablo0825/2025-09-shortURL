@@ -1,10 +1,9 @@
 // uploadAvatar.ts
 import multer from "multer";
-import e from "express";
+import type { Request } from "express";
 
 // 2bm
 const MAX_BYTES = 2 * 1024 * 1024;
-const ALLOWED_MIME = new Set(["image/png", "image/jpg", "image/jpeg", "image/webp"]);
 
 export const uploadAvatar = multer({
     // 小檔案暫存到memory就好，大檔案在暫存到disk
@@ -16,9 +15,9 @@ export const uploadAvatar = multer({
     // req 請求物件
     // file 上傳檔案
     // cb 回呼函式，用來告訴multer，是否要接受檔案
-    fileFilter(req: e.Request, file: Express.Multer.File, cb: multer.FileFilterCallback) {
-        if (!ALLOWED_MIME.has(file.mimetype)) {
-            return cb(new Error("只允許 JPG / PNG / WEBP 格式"));
+    fileFilter(req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) {
+        if (!file.mimetype.startsWith("image/")) {
+            return cb(new Error("只允許上傳圖片"));
         }
         // 接受檔案
         // 第一個參數是錯誤，null表示沒有錯誤

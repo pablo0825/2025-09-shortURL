@@ -35,5 +35,6 @@ export function safeJoin(base:string, ...parts:string[]):string {
         throw new Error("非法路徑")
     }
 
-    return p;
+    // 修正成，返回絕對路徑
+    return normalizedPath;
 }
