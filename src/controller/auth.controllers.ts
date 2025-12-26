@@ -167,12 +167,9 @@ export const login = async (req: Request, res: Response) => {
 
     const {email, password} = result.data;
 
-    // 獲取連線資源
-    client = await pool.connect();
-
     try {
         // 查user
-        const user = await client.query<{id:number, email:string, password_hash:string, nickname:string}>('SELECT id, email, password_hash, nickname FROM users WHERE email = $1 AND is_active = TRUE', [email]);
+        const user = await pool.query<{id:number, email:string, password_hash:string, nickname:string}>('SELECT id, email, password_hash, nickname FROM users WHERE email = $1 AND is_active = TRUE', [email]);
         if (user.rowCount === 0) {
             return res.status(401).json({
                 ok: false,
@@ -194,7 +191,7 @@ export const login = async (req: Request, res: Response) => {
 
         // [標記] 這邊感覺要修改
         // 取得user的role
-        const userRole = await client.query<{type:string}>('SELECT r.type FROM role r JOIN user_role ur ON r.id = ur.role_id WHERE ur.user_id = $1', [id]);
+        const userRole = await pool.query<{type:string}>('SELECT r.type FROM role r JOIN user_role ur ON r.id = ur.role_id WHERE ur.user_id = $1', [id]);
         if (userRole.rowCount === 0) {
             console.error(`[auth/login] user ${id} 找不到角色`);
             // 用500，這比較像是系統錯誤
@@ -242,6 +239,9 @@ export const login = async (req: Request, res: Response) => {
         const userAgent = req.get("user-agent") ?? null;
         const userIp = req.ip; // [標註] 這種寫法可能會有問題，但先這樣
         const lastUsedAt = new Date();
+
+        // 獲取連線資源
+        client = await pool.connect();
 
         // [交易] 開始
         await client.query('BEGIN')

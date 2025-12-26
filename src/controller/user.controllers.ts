@@ -8,6 +8,10 @@ import sharp from "sharp";
 import fs from "fs/promises";
 import {writeUserLogToDB} from "../utils/writeUserLogToDB";
 import {UserLogActionEnum} from "../enum/userLogAction.enum";
+import {bodySchema, userIdSchema} from "../zod/user.schema";
+import bcrypt from "bcrypt";
+import {handleAccessTokenBlackList} from "../utils/handleAccessTokenBlackList";
+import {sendEmail} from "../email/sendEmail";
 
 
 // [api] 讀取個人資料
@@ -35,17 +39,23 @@ export const updateMyProfile = async (req: Request, res: Response) => {
 }
 
 export const updateMyAvatar = async (req: Request, res: Response) => {
-    const userIdNum = Number(req.user?.id);
-    const userIdStr = String(userIdNum); //
+    let userIdNum:number;
+    let userIdStr:string;
     let client: PoolClient | undefined;
     let oldAvatarKey: string | null = null;
 
-    if (Number.isNaN(userIdNum)) {
+    const userIdParams = userIdSchema.safeParse(req.user?.id);
+
+    if (!userIdParams.success) {
+        const msg = userIdParams.error.issues[0]?.message ?? "未登入"
         return res.status(401).json({
             ok: false,
-            error: "未登入"
-        })
+            error: msg,
+        });
     }
+
+    userIdNum = userIdParams.data;
+    userIdStr = userIdNum.toString();
 
     // 檢查檔案是否存在
     if (!req.file) {
@@ -60,18 +70,20 @@ export const updateMyAvatar = async (req: Request, res: Response) => {
 
     // 存放根目錄
     // process.cwd() 獲取當前工作目錄的路徑
-    // path.join 合併路徑，如:/2025-shortURL/uploads/
-    const uploadRoot:string = path.join(process.cwd(), "uploads");
+    // path.join 合併路徑，如:/2025-shortURL/uploads/avatars/
+    const uploadRoot:string = path.join(process.cwd(), "uploads", "avatars");
+
     // 檢查路徑合法的話，回傳/2025-shortURL/uploads/avatars/user-99
-    const userDir:string = safeJoin(uploadRoot, "avatars", userIdStr);
+    const userDir = safeJoin(uploadRoot, userIdStr);
 
     // 檢查目標路徑是否存在，不存在的話，就建立資料夾
     await ensureDir(userDir);
 
     // 用uuid4創造一個隨機的web檔名稱
     const filename = `${uuid4()}.webp`;
+
     // 檢查路徑是否合法，合法的話，回傳/2025-shortURL/uploads/avatars/user-99/550e8400-e29b.web
-    const absFilePath:string = safeJoin(userDir, filename);
+    const absFilePath = safeJoin(userDir, filename);
 
     // 對外搭配用的url
     const avatarUrl:string = `/static/avatars/${userIdStr}/${filename}`;
@@ -102,7 +114,7 @@ export const updateMyAvatar = async (req: Request, res: Response) => {
         await client.query('BEGIN');
 
         // 用FOR UPDATE 鎖定使用者，避免併發修改
-        const user = await client.query<{avatar_key: string}>('SELECT avatar_key FROM users WHERE id = $1 FOR UPDATE', [userIdNum]);
+        const user = await client.query<{avatar_key: string}>('SELECT avatar_key FROM users WHERE id = $1 AND is_active = TRUE FOR UPDATE', [userIdNum]);
 
         if (user.rowCount === 0) {
             // [交易] 失敗，結束
@@ -152,43 +164,35 @@ export const updateMyAvatar = async (req: Request, res: Response) => {
         // [交易] 成功，結束
         await client.query('COMMIT');
 
-        // // 5. 刪除舊檔 (同步執行，會增加回應時間，但保證硬碟乾淨)
-        // // 只有在 COMMIT 成功後才執行
-        // if (oldAvatarKey && oldAvatarKey.startsWith(`/static/avatars/${userIdStr}/`)) {
-        //     const oldRelPath = oldAvatarKey.replace("/static", "uploads");
-        //     const oldAbsPath = path.join(process.cwd(), oldRelPath);
-        //
-        //     // 雙重檢查：確保要刪除的檔案真的位於 avatars 目錄下
-        //     const resolvedOld = path.resolve(oldAbsPath);
-        //     const resolvedBase = path.resolve(allowedBase) + path.sep;
-        //
-        //     if (resolvedOld.startsWith(resolvedBase)) {
-        //         // 不等待它完成 (Fire and Forget) 也可以，看您是否在乎捕捉刪除錯誤
-        //         // 這裡選擇 await 確保乾淨
-        //         await fs.unlink(resolvedOld).catch(err => console.warn("刪除舊檔失敗:", err));
-        //     }
-        // }
-
-        // [標記] 未完成
         // 刪除舊的頭像
+        // startsWith 判斷字串的開頭是否相同
         if (oldAvatarKey  && oldAvatarKey.startsWith(`/static/avatars/${userIdStr}/`)) {
-            // process.cwd() 獲取當前目錄的路徑
-            // path.join 合併路徑
             // .replac 把oldAvatarURL的偽裝的 static 替換成 真實的 uploads
+            const oldRelPath:string = oldAvatarKey.replace("/static", "uploads");
+
+            // process.cwd() 獲取當前目錄的路徑
+            // path.join() 合併成相對路徑
             // 回傳，如:/2025-shortURL/uploads/avatars/user-99/550e8400-e29b.web
-            const oldAbs:string = path.join(process.cwd(), oldAvatarKey?.replace("/static", "uploads"));
+            const oldAbsPath:string = path.join(process.cwd(), oldRelPath);
 
-            ///2025-shortURL/uploads/avatars/
-            const allowedBase:string = path.join(process.cwd(), "uploads", "avatars") + path.sep;
+            // 定義基礎目錄，如:/2025-shortURL/uploads/avatars/
+            // 定義邊界
+            const allowedBase:string = path.join(process.cwd(), "uploads", "avatars", `${userIdStr}/`);
 
-            // 轉為絕對路徑
-            // .resolve 可以檢查試圖跳出的路徑的真身
-            const resolvedOld:string = path.resolve(oldAbs);
+            // 雙重檢查: 確保要刪除的檔案，真的在/avatars/底下
+            // resolve() 可以檢查試圖跳出的路徑的真身
+            const resolvedOld:string = path.resolve(oldAbsPath);
 
-            // 檢查路徑開頭是否相同，ture，到資料夾中刪除指定檔案，false，跳過
-            if (resolvedOld?.startsWith(path.resolve(allowedBase))) {
+            // path.sep 加上/
+            // 基礎目錄的路徑，轉為絕對路徑，怕遺失/，所以用.sep加上/
+            const resolvedBase:string = path.resolve(allowedBase) + path.sep;
+
+            if (resolvedOld.startsWith(resolvedBase)) {
                 // 刪除舊的使用者頭像
-                await fs.unlink(resolvedOld).catch((err) => {});
+                await fs.unlink(resolvedOld).catch((err) => {
+                    // .warn() 異常但不影響
+                    console.warn("刪除舊檔失敗:", err);
+                });
             }
         }
 
@@ -216,6 +220,7 @@ export const updateMyAvatar = async (req: Request, res: Response) => {
 
         const msg = err instanceof Error ? err.message : String(err);
 
+        // error() 嚴重警告，會導致程式無法運行
         console.error("[api:user/updateAvatar] error:", msg, err);
 
         return res.status(500).json({
@@ -224,6 +229,160 @@ export const updateMyAvatar = async (req: Request, res: Response) => {
         });
     } finally {
         // [交易] 結束釋放路線
+        if (client) client.release();
+    }
+}
+
+// [api] 更新使用者密碼
+export const changeMyPassword = async (req: Request, res: Response) => {
+    let client: PoolClient | undefined;
+
+    const userIdParams = userIdSchema.safeParse(req.user?.id);
+
+    if (!userIdParams.success) {
+        const msg:string = userIdParams.error.issues[0]?.message ?? "未登入";
+
+        return res.status(401).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const bodyParams = bodySchema.safeParse(req.body);
+
+    if (!bodyParams.success) {
+        const msg:string = bodyParams.error.issues[0]?.message ?? "密碼格式錯誤";
+
+        return res.status(400).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userId:number = userIdParams.data;
+    const {currentPassword, newPassword} = bodyParams.data;
+
+    try {
+        const user = await pool.query<{email:string, password_hash:string, nickname:string}>('SELECT email, password_hash, nickname FROM users WHERE id = $1 AND is_active = TRUE', [userId]);
+
+        if (user.rowCount === 0) {
+            // [交易] 失敗，結束
+            await pool.query("ROLLBACK");
+
+            return res.status(404).json({
+                ok: false,
+                error:"使用者不存在或資料異常"
+            })
+        }
+
+        const passwordHash:string = user.rows[0].password_hash;
+        const nickname:string = user.rows[0].nickname;
+        const email:string = user.rows[0].email;
+
+        // 比較密碼是否相同
+        const isSamePassword:boolean = await bcrypt.compare(currentPassword, passwordHash);
+
+        if (!isSamePassword) {
+            // [交易] 失敗，結束
+            await pool.query('ROLLBACK');
+
+            return res.status(400).json({
+                ok: false,
+                error: "舊密碼輸入錯誤，請重新確認",
+            });
+        }
+
+        // 新密碼加密
+        const newPasswordHash:string = await bcrypt.hash(newPassword, 10);
+
+        // 獲得一條單獨的路線
+        client = await pool.connect();
+
+        // [交易] 開始
+        await client.query('BEGIN');
+
+        // 更新密碼
+        const updateUser = await client.query('UPDATE users SET password_hash = $1, last_password_reset_at = now() WHERE id = $2 AND is_active = TRUE', [newPasswordHash, userId]);
+
+        if (updateUser.rowCount === 0) {
+            await client.query('ROLLBACK');
+
+            return res.status(404).json({
+                ok: false,
+                error: "使用者不存在或資料異常",
+            });
+        }
+
+        // 註銷所有裝置
+        await client.query('UPDATE refresh_token SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL ', [userId]);
+
+        // 更新user_log
+        await writeUserLogToDB(userId, UserLogActionEnum.UPDATE_PASSWORD, {
+            detail:"使用者更新密碼成功",
+            metadata: {
+                name: nickname,
+            },
+            ipAddress: req.ip,
+            userAgent: req.get("user-agent") ?? null
+        }, client);
+
+        // [交易] 成功，結束
+        await client.query('COMMIT');
+
+        // 額外:處理access token的黑名單
+        // 這邊不等待完成，讓它去後台背景處理
+        handleAccessTokenBlackList(req).catch(err =>
+                console.error("[api:user/changeMyPassword] failed to blacklist token:", err)
+        );
+
+        const resetAt = new Date().toLocaleString("zh-TW", { timeZone: "Asia/Taipei" });
+
+        // [標註] 我覺得這邊可以優化
+        // HTML 郵件內容（使用反引號）
+        const html = `
+            <h2>更新密碼</h2>
+            <p>親愛的 ${nickname}：</p>
+            <p>您的帳號密碼已於 ${resetAt} 成功重設。</p>
+            <p>重設位置 IP: ${req.ip}</p>
+            <p>如果這不是您本人的操作,請立即聯繫我們的客服團隊。</p>
+        `;
+
+        const emailOptions = {
+            to: email,
+            subject:` ${nickname} 您的密碼更新成功通知`,
+            html: html,
+            text:`親愛的 ${nickname}：\n\n您的帳號密碼更新成功。\n\n如果這不是您本人的操作,請立即聯繫我們的客服團隊。\n\n`,
+        }
+
+        // 寄出email
+        // 不等結果，讓它在後台執行
+        sendEmail(emailOptions).catch(err => {
+            console.error("[api:user/changeMyPassword] notification failed to send:", err)
+        });
+
+        return res.status(200).json({
+            ok: true,
+            message: "密碼已成功重設，請使用新密碼重新登入",
+        });
+    } catch (err) {
+        if (client) {
+            // 多包一層try catch是為了讓finally可以被執行
+            // 如果沒有包的話，會停留在catch上
+            // 這樣就不能釋放pool的連線資源
+            try {
+                await client.query('ROLLBACK');
+            } catch {}
+        }
+
+        const msg = err instanceof Error ? err.message : String(err);
+
+        console.error("[api:user/changeMyPassword] error:", msg, err);
+
+        return res.status(500).json({
+            ok: false,
+            error: "系統錯誤"
+        });
+    } finally {
         if (client) client.release();
     }
 }

@@ -20,6 +20,7 @@ let sendVerificationLimiter: ReturnType<typeof rateLimit> | null = null;
 let generalApiLimiter: ReturnType<typeof rateLimit> | null = null;
 let resetPasswordLimiter: ReturnType<typeof rateLimit> | null = null;
 let createLinkLimiter:ReturnType<typeof rateLimit> | null = null;
+let updateAvatarLimiter: ReturnType<typeof rateLimit> | null = null;
 
 // 建立rate limiter的工廠函數
 function createRedisRateLimiter (options: RateLimitOptions) {
@@ -126,7 +127,15 @@ export function initRedisRateLimiter():void {
         max: 100,
         prefix: "rl:create-link:",
         message: "今日建立短網址已達上限（100 次），請明天再試",
-    })
+    });
+
+    // 上傳速度(圖片) - 1小時最多上傳10次
+    updateAvatarLimiter = createRedisRateLimiter({
+        windowMs: 60 * 60 * 1000,
+        max: 10,
+        prefix: "rl:update-avatar:",
+        message: "上傳次數過多，請稍後再試（每小時最多 10 次）",
+    });
 }
 
 // routes 用這個讀取limiter
@@ -138,7 +147,8 @@ export function getRateLimiters () {
             !sendVerificationLimiter ||
             !generalApiLimiter ||
             !resetPasswordLimiter ||
-            !createLinkLimiter
+            !createLinkLimiter ||
+            !updateAvatarLimiter
     ) {
         throw new Error("Rate limiters not initialized. Did you forget to call initRateLimiters()?");
     }
@@ -150,6 +160,7 @@ export function getRateLimiters () {
         sendVerificationLimiter,
         generalApiLimiter,
         resetPasswordLimiter,
-        createLinkLimiter
+        createLinkLimiter,
+        updateAvatarLimiter,
     };
 }
