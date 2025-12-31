@@ -65,3 +65,33 @@ import redis from "../src/redis/redisClient"
 //
 // loadRbacFromDb();
 
+// const lottery:number[] = [];
+//
+// for (let i = 0; lottery.length < 6; i++) {
+//     let x = Math.floor(Math.random() * 49)+1;
+//
+//     if (lottery.indexOf(x) === -1) {
+//         lottery.push(x);
+//     }
+// }
+
+// const lotterySet = new Set<number>();
+//
+// while (lotterySet.size < 6) {
+//     const x = Math.floor(Math.random() * 49) + 1;
+//     lotterySet.add(x);
+// }
+//
+// const lottery:number[] = Array.from(lotterySet).sort((a:number,b:number):number => a - b);
+//
+// console.log(lottery);
+
+// const lottery:number[] = [];
+//
+// while (lottery.length < 6) {
+//     let n = Math.floor(Math.random() * 49)+1;
+//
+//     if (lottery.indexOf(n) === -1) {
+//         lottery.push(n);
+//     }
+// }

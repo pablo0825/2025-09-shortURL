@@ -226,3 +226,52 @@
 
 -- 2025/12/19
 -- ALTER TABLE users ADD COLUMN avatar_updated_at TIMESTAMPTZ;
+
+-- 2025/12/29
+-- ALTER TABLE users ADD COLUMN twofa_enabled boolean not null default false , -- 2fa_已啟用
+--     ADD COLUMN twofa_secret_encrypted BYTEA NULL , --secret 加密(可解出來明文)
+--     ADD COLUMN twofa_secret_iv BYTEA NULL , -- 隨機值, 12bytes
+--     ADD COLUMN twofa_secret_auth_tag BYTEA NULL , -- 認證標籤
+--     ADD COLUMN twofa_enabled_at TIMESTAMPTZ NULL; -- 2fa_已啟用的時間
+--
+-- -- 2025/12/30
+-- -- 備用碼
+-- CREATE TABLE user_backup_codes (
+--     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY ,
+--     user_id BIGINT NOT NULL REFERENCES  users(id) ON DELETE CASCADE , -- 外鍵
+--     version INT NOT NULL , -- 目前的備用碼是第幾版
+--     code_hash TEXT NOT NULL , -- hash後的backup code
+--     created_at TIMESTAMPTZ NOT NULL DEFAULT now() , -- 創建時間
+--     used_at TIMESTAMPTZ NULL , -- backup code被使用的時間
+--     used_by_ip INET NULL , -- ip位址
+--     used_by_user_agent TEXT NULL , -- 裝置資訊
+--     used_by_session_id TEXT NULL  -- refresh_token_id，紀錄使用者從哪個裝置登入
+-- );
+--
+-- -- 加上限制
+-- -- 2fa 狀態一致性 (true，所有欄位必須有資料; false，所有欄位的資料為null)
+-- ALTER TABLE users ADD CONSTRAINT chk_users_twofa_state_consistency CHECK (
+--     (
+--         twofa_enabled = TRUE
+--             AND twofa_secret_encrypted IS NOT NULL
+--             AND twofa_secret_iv IS NOT NULL
+--             AND twofa_secret_auth_tag IS NOT NULL
+--             AND twofa_enabled_at IS NOT NULL
+--         ) OR (
+--         twofa_enabled = FALSE
+--             AND twofa_secret_encrypted IS NULL
+--             AND twofa_secret_iv IS NULL
+--             AND twofa_secret_auth_tag IS NULL
+--             AND twofa_enabled_at IS NULL
+--         )
+--     );
+--
+-- CREATE INDEX IF NOT EXISTS idx_user_backup_codes_user_id
+--     ON user_backup_codes(user_id);
+--
+-- CREATE INDEX IF NOT EXISTS idx_user_backup_codes_user_version
+--     ON user_backup_codes(user_id, version);
+--
+-- CREATE INDEX IF NOT EXISTS idx_user_backup_codes_user_version_unused
+--     ON user_backup_codes(user_id, version)
+--     WHERE used_at IS NULL;
