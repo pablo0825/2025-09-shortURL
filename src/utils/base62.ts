@@ -1,4 +1,5 @@
 // base62.ts
+// [標記] 用class不好，改用function，之後有空再回來改
 export class Base62 {
     // readonly 只能讀取，不能修改 (只能在constructor賦值，如果在以外的地方，會產生錯誤)
     private readonly alphabet: string; // 字符
