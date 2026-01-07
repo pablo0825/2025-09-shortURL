@@ -67,24 +67,29 @@ import bcrypt from "bcrypt";
 //
 // loadRbacFromDb();
 
-// square(2);
-// //
-// console.log(typeof square(2));
-// //
-// // // const square = function (num:number):number{
-// // //     return num * num;
-// // // }
-// //
-// function square(size: number) {
-//     return size * size;
-// }
-//
-// // const square = (size:number):number => size * size;
-//
-// // const x = null;
-// //
-// // console.log(typeof x);
 
+type ToBeOrNotToBe = {
+    toBe: (val: number) => boolean;
+    notToBe: (val: number) => boolean;
+};
 
+function expect(val: number): ToBeOrNotToBe {
+    return {
+        toBe(v:number) {
+            if (v === val) {
+                return true;
+            } else {
+                throw new Error("Not Equal");
+            }
+        },
+        notToBe(v:number) {
+            if (v !== val) {
+                return true;
+            } else {
+                throw new Error("Equal");
+            }
+        }
+    }
+}
 
 

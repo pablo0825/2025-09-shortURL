@@ -122,6 +122,8 @@ export function encrypt(text:string):{
     return { encrypted, iv, authTag };
 }
 
+
+
 // 解密
 export function decrypt(encrypted: Buffer, iv: Buffer, authTag: Buffer): string {
     // 建立一個解密工具

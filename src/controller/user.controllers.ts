@@ -9,9 +9,15 @@ import fs from "fs/promises";
 import {writeUserLogToDB} from "../utils/writeUserLogToDB";
 import {UserLogActionEnum} from "../enum/userLogAction.enum";
 import {bodySchema, userIdSchema} from "../zod/user.schema";
+import {emailSchema} from "../zod/auth.schema";
 import bcrypt from "bcrypt";
 import {handleAccessTokenBlackList} from "../utils/handleAccessTokenBlackList";
 import {sendEmail} from "../email/sendEmail";
+import {generateTotpSecret, buildOtpAuthUrl, verifyTotpCode} from "../utils/totp"
+import {toDataUrl} from "../utils/qrcode";
+import {encrypt, decrypt} from "../utils/cyptoUtils"
+import redis from "../redis/redisClient";
+import crypto from "crypto";
 
 
 // [api] 讀取個人資料
@@ -385,4 +391,121 @@ export const changeMyPassword = async (req: Request, res: Response) => {
     } finally {
         if (client) client.release();
     }
+}
+
+export const setup2fa = async (req:Request, res:Response) => {
+    const userIdParams = userIdSchema.safeParse(req.user?.id);
+
+    if (!userIdParams.success) {
+        const msg:string = userIdParams.error.issues[0]?.message ?? "未登入";
+
+        return res.status(401).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userId:number = userIdParams.data;
+
+    const userEmailParams =emailSchema.safeParse(req.user?.email);
+
+    if (!userEmailParams.success) {
+        const msg:string = userEmailParams.error.issues[0]?.message ?? "未登入";
+
+        return res.status(401).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userEmail:string = userEmailParams.data;
+
+    //
+    const secret:string = generateTotpSecret();
+    const issuer:string = "MyApp";
+    const accountName:string = userEmail;
+
+    //
+    const otpauthUrl:string = buildOtpAuthUrl(issuer, accountName, secret);
+    //
+    let qrDataUrl:string;
+
+    try {
+        // 產生qr code圖片
+        qrDataUrl = await toDataUrl(otpauthUrl);
+    } catch (err) {
+        console.error("[api:user/setup2fa] QR code generation failed", err);
+
+        return res.status(500).json({
+            ok: false,
+            error: "無法產生驗證 QR Code",
+        });
+    }
+
+    // 產生長度為32的隨機碼，16 bytes等於兩個字元
+    const nonce:string = crypto.randomBytes(16).toString("hex");
+
+    // 加密secret，並回傳encrypted, iv, authTag
+    const {encrypted, iv, authTag} = encrypt(secret);
+
+    const redisKey = `2fa:pending:${userId}:${nonce}`;
+    // 過期時間設定10分鐘(600秒)
+    const ttlSec = 600;
+
+    // 把加密資料存到redis中
+    // 把buffer轉成整數陣列，會變太胖，浪費redis的記憶體
+    // 所以在存入前，先改成base64格式的字串
+    try {
+        await redis.set(redisKey, JSON.stringify({
+            encrypted:encrypted.toString("base64"),
+            iv:iv.toString("base64"),
+            authTag:authTag.toString("base64"),
+        }), {EX:ttlSec});
+    } catch (err) {
+        console.error("[api:user/setup2fa] Redis write failed", err);
+
+        return res.status(503).json({
+            ok: false,
+            error: "系統暫時無法設定 2FA，請稍後再試",
+        });
+    }
+
+    return res.json({
+        ok:true,
+        qrCode:qrDataUrl,
+        expiresInSec: 600,
+        randomCode:nonce
+    });
+};
+
+// 啟用2fa
+export const enable2fa = async (req:Request, res:Response) => {
+    // userIdParams用zod驗證，true，往下執行; false，返回401錯誤
+    // userId = userIdParams.data;
+    // codeAndNonceParams用zod驗證，true，往下執行; false，返回400錯誤 (zod用string，用正規表達式/^\d{6}$/，表示6碼數字) (字元長度達32)
+    // {code, nonce} = codeParams.data
+    // redisKey = `2fa:pending:${userId}:${nonce}`
+    // 用try catch包住redis，怕查詢時爆掉
+    // raw:string | null = await redis.get(redisKey);
+    // raw判斷是否存在，true，往下執行; false，返回400，error:"2FA 設定已過期，請重新開始"
+    // --- (不知道需不需要)
+    // 寫一個interface，{encrypted:string; iv:string; authTag:string}
+    // let payload:TwoFaRedisPayload
+    // 用try catch包住，用json.parse(raw)，解開資料
+    // 從payload中把變數解出，如:encrypted, iv, authTag
+    // --
+    // parsedData = json.parse(raw)，解開資料
+    // 用Buffer.from(parsedData, base64)，把字串轉回buffer，獲得encrypted, iv, authTag
+    // 用decrypt把encrypted解開
+    // secret = decrypt(encrypted, iv, authTag)
+    // ok = verifyTotpCode(token:code, secret)
+    // 檢查ok是否存在，true，往下執行; false，返回400，error:"驗證碼錯誤"
+    // 產生backup code
+    // backupCodes:arr[] = generateBackupCodes(10); 產生10組
+    // 用try catch包住
+    // 把backupCode，hash一下
+    // backupHashes = await hashBackupCodes(backupCodes);
+    // 用userId作為key，更新user table的欄位，twofa_enabled = true, twofa_secret_encrypted = encrypted, twofa_secret_iv = iv, twofa_secret_auth_tag = authTag, twofa_enabled_at = now();
+    // 用insert，把userId, backupHashes插入到user_backup_codes，然後要用for迴圈把backupHashes中的每一筆hash取出來，存到db中
+    // version要怎麼處理?
 }
