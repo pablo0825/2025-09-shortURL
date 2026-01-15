@@ -1,5 +1,6 @@
 // jwtTwoToken.ts
 import jwt, {SignOptions, JwtPayload, TokenExpiredError, JsonWebTokenError} from "jsonwebtoken";
+import z from "zod";
 
 // 定義我們預期的 Token Payload 結構
 interface TwoFaTokenPayload extends JwtPayload {
@@ -8,7 +9,7 @@ interface TwoFaTokenPayload extends JwtPayload {
 }
 
 function loadKey ():string {
-    const rawKey:string | undefined = process.env.TWOFA_TOKEN_SECRET
+    const rawKey:string | undefined = process.env.TWOFA_TOKEN_SECRET;
 
     if (!rawKey) {
         throw new Error("[jwt-2fa] 環境變數中未定義 TWOFA_TOKEN_SECRET")
@@ -19,25 +20,41 @@ function loadKey ():string {
 
 const TWOFA_TOKEN_KEY:string = loadKey();
 
-export function signTwofaToken (userId:number):string {
+// 2FA token payload schema
+const twofaPayloadSchema = z.object({
+    sub: z.string().regex(/^\d+$/),         // userId as digits
+    type: z.literal("2fa"),
+    jti: z.string().min(10),               // unique id for one-time use (recommend UUID)
+});
+
+export function signTwofaToken (userId:number): { token: string; jti: string; expiresInSec: number } {
+    const jti = crypto.randomUUID();
+
     const payload = {
         sub: String(userId),
         type: "2fa",
+        jti: jti,
     };
 
+    const expiresInSec:number = 3 * 60;
+
     const options:SignOptions = {
-        expiresIn: "5m",
+        expiresIn: expiresInSec,
     }
 
-    return jwt.sign(payload, TWOFA_TOKEN_KEY, options);
+    const token = jwt.sign(payload, TWOFA_TOKEN_KEY, options);
+
+    return { token, jti, expiresInSec };
 }
 
-export function verifyTwofaToken (token:string): { ok:true, userId: number } | {ok:false, reason?: string, message?: string } {
+
+export function verifyTwofaToken (token:string): { ok: true; userId: number; jti: string } | { ok: false; reason: string; message: string } {
     try {
-        const payload = jwt.verify(token, TWOFA_TOKEN_KEY);
+        // 限制演算法
+        const decoded = jwt.verify(token, TWOFA_TOKEN_KEY, {algorithms:["HS256"]});
 
         // 檢查是否為物件
-        if (typeof payload === "string") {
+        if (typeof decoded === "string") {
             return {
                 ok: false,
                 reason: "malformed",
@@ -45,41 +62,21 @@ export function verifyTwofaToken (token:string): { ok:true, userId: number } | {
             };
         }
 
-        // 檢查簽章類型
-        if (payload.type === "2fa") {
-            return {
-                ok: false,
-                reason: "invalid",
-                message: 'Token 類型不正確'
-            };
+        const parsed = twofaPayloadSchema.safeParse(decoded);
+
+        if (!parsed.success) {
+            return { ok: false, reason: "invalid", message: "Token payload 格式不正確" };
         }
 
-        // 強制轉型，轉成我們簽發的格式
-        const p = payload as TwoFaTokenPayload;
+        const { sub, jti } = parsed.data;
 
-        // 確保sub存在
-        if (!p.sub) {
-            return {
-                ok: false,
-                reason: "invalid",
-                message: '缺少有效的 sub 欄位'
-            };
+        const userId = Number(sub);
+
+        if (!Number.isSafeInteger(userId) || userId <= 0) {
+            return { ok: false, reason: "invalid", message: "userId 格式不正確" };
         }
 
-        // 轉換為數字並驗證
-        // paresInt 會從字串轉為整數，除非遇到第一個非number的字元
-        const userId:number = parseInt(p.sub, 10);
-
-        // 測試userId是否為整數
-        if (!Number.isInteger(userId) || userId <= 0) {
-            return {
-                ok: false,
-                reason: "invalid",
-                message: 'userId 格式不正確'
-            };
-        }
-
-        return { ok:true, userId:userId };
+        return { ok: true, userId, jti };
     } catch (err) {
         if (err instanceof TokenExpiredError) {
             return {

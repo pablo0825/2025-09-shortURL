@@ -8,7 +8,7 @@ import sharp from "sharp";
 import fs from "fs/promises";
 import {writeUserLogToDB} from "../utils/writeUserLogToDB";
 import {UserLogActionEnum} from "../enum/userLogAction.enum";
-import {bodySchema, userIdSchema} from "../zod/user.schema";
+import {bodySchema, codeAndNonceSchema, userIdSchema} from "../zod/user.schema";
 import {emailSchema} from "../zod/auth.schema";
 import bcrypt from "bcrypt";
 import {handleAccessTokenBlackList} from "../utils/handleAccessTokenBlackList";
@@ -18,6 +18,7 @@ import {toDataUrl} from "../utils/qrcode";
 import {encrypt, decrypt} from "../utils/cyptoUtils"
 import redis from "../redis/redisClient";
 import crypto from "crypto";
+import {generteBackupCodes, hashBackupCodes} from "../utils/backupCodes";
 
 
 // [api] 讀取個人資料
@@ -480,32 +481,156 @@ export const setup2fa = async (req:Request, res:Response) => {
 
 // 啟用2fa
 export const enable2fa = async (req:Request, res:Response) => {
-    // userIdParams用zod驗證，true，往下執行; false，返回401錯誤
-    // userId = userIdParams.data;
-    // codeAndNonceParams用zod驗證，true，往下執行; false，返回400錯誤 (zod用string，用正規表達式/^\d{6}$/，表示6碼數字) (字元長度達32)
-    // {code, nonce} = codeParams.data
-    // redisKey = `2fa:pending:${userId}:${nonce}`
-    // 用try catch包住redis，怕查詢時爆掉
-    // raw:string | null = await redis.get(redisKey);
-    // raw判斷是否存在，true，往下執行; false，返回400，error:"2FA 設定已過期，請重新開始"
-    // --- (不知道需不需要)
-    // 寫一個interface，{encrypted:string; iv:string; authTag:string}
-    // let payload:TwoFaRedisPayload
-    // 用try catch包住，用json.parse(raw)，解開資料
-    // 從payload中把變數解出，如:encrypted, iv, authTag
-    // --
-    // parsedData = json.parse(raw)，解開資料
-    // 用Buffer.from(parsedData, base64)，把字串轉回buffer，獲得encrypted, iv, authTag
-    // 用decrypt把encrypted解開
-    // secret = decrypt(encrypted, iv, authTag)
-    // ok = verifyTotpCode(token:code, secret)
-    // 檢查ok是否存在，true，往下執行; false，返回400，error:"驗證碼錯誤"
-    // 產生backup code
-    // backupCodes:arr[] = generateBackupCodes(10); 產生10組
-    // 用try catch包住
-    // 把backupCode，hash一下
-    // backupHashes = await hashBackupCodes(backupCodes);
-    // 用userId作為key，更新user table的欄位，twofa_enabled = true, twofa_secret_encrypted = encrypted, twofa_secret_iv = iv, twofa_secret_auth_tag = authTag, twofa_enabled_at = now();
-    // 用insert，把userId, backupHashes插入到user_backup_codes，然後要用for迴圈把backupHashes中的每一筆hash取出來，存到db中
-    // version要怎麼處理?
+    const userIdParams = userIdSchema.safeParse(req.user?.id);
+
+    if (!userIdParams.success) {
+        const msg:string = userIdParams.error.issues[0]?.message ?? "未登入";
+
+        return res.status(401).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userId:number = userIdParams.data;
+
+    const codeAndNonceParams = codeAndNonceSchema.safeParse(req.body);
+
+    if (!codeAndNonceParams.success) {
+        const msg:string = codeAndNonceParams.error.issues[0]?.message ?? "驗證碼錯誤";
+
+        return res.status(400).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const {code, nonce} = codeAndNonceParams.data;
+
+    const redisKey = `2fa:pending:${userId}:${nonce}`;
+
+    let raw:string | null;
+
+    try {
+        raw = await redis.get(redisKey);
+    } catch (err) {
+        console.error("[api:user/enable2fa] redis read failed", err);
+
+        return res.status(500).json({
+            ok: false,
+            error: "系統暫時無法啟用 2FA / Redis 讀取失敗",
+        });
+    }
+
+    if (!raw) {
+        return res.status(400).json({
+            ok: false,
+            error: "2FA 設定已過期，請重新開始",
+        });
+    }
+
+    let secret: string;
+    let encrypted: Buffer;
+    let iv: Buffer;
+    let authTag: Buffer;
+
+    try {
+        // JSON.parse 把json物件轉為js的物件
+        const parsedData = JSON.parse(raw);
+
+        // 把 encrypted, iv, authTag 轉為 buffer 型別
+        encrypted = Buffer.from(parsedData.encrypted, 'base64');
+        iv = Buffer.from(parsedData.iv, 'base64');
+        authTag = Buffer.from(parsedData.authTag, 'base64');
+
+        // 把加密後的 encrypted 解成明文密碼
+        secret = decrypt(encrypted, iv, authTag);
+    } catch (err) {
+        return res.status(500).json({
+            ok: false,
+            error: "資料解析失敗",
+        });
+    }
+
+    const isValid:boolean = verifyTotpCode(code, secret);
+
+    if (!isValid) {
+        return res.status(400).json({
+            ok: false,
+            error: "驗證碼錯誤",
+        });
+    }
+
+    // 產生10組backup code
+    const backupCodes:string[] = generteBackupCodes(10);
+
+    // hash一下，backupCodes
+    // 因為hash比較慢，所以移出來外面
+    const backupHashes:string[] = await hashBackupCodes(backupCodes);
+
+    let client: PoolClient | undefined;
+
+    try {
+        client = await pool.connect();
+
+        // [Transaction] 開啟交易
+        await client.query('BEGIN');
+
+        // 查 users table 的 version
+        // 上鎖，避免併發修改，確保取出最新的version
+        const userVersion = await client.query<{twofa_backup_codes_version:number}>('SELECT twofa_backup_codes_version FROM users WHERE id = $1 FOR UPDATE ', [userId]);
+
+        if (userVersion.rowCount === 0) {
+            return res.status(404).json({
+                ok: false,
+                error:"使用者不存在或資料異常"
+            })
+        }
+
+        // 把 user 中的 version 取出來+1
+        const newVersion:number = userVersion.rows[0].twofa_backup_codes_version + 1;
+
+        // 更新users中的2fa欄位
+        await client.query('UPDATE users SET twofa_enabled = TRUE, twofa_secret_encrypted = $1, twofa_secret_iv = $2, twofa_secret_auth_tag = $3, twofa_enabled_at = now(), twofa_backup_codes_version = $4 WHERE id = $5', [encrypted, iv, authTag, newVersion, userId]);
+
+        const insertPromises = backupHashes.map(hash => {
+            return client!.query('INSERT INTO user_backup_codes(user_id, version, code_hash) VALUES ($1, $2, $3)', [userId, newVersion, hash]);
+        });
+
+        // 使用Promise.all 平行處理
+        await Promise.all(insertPromises);
+
+        // [Transaction] 交易成功
+        await client.query("COMMIT");
+
+        // 把redis中的key刪掉，但這樣有必要嗎?因為有設過期時間
+        await redis.del(redisKey);
+
+        return res.status(200).json({
+            ok: true,
+            message:"2fa 已啟用",
+            backupCodes:backupCodes
+        })
+    } catch (err) {
+        if (client) {
+            // 多包一層try catch是為了讓finally可以被執行
+            // 如果沒有包的話，會停留在catch上
+            // 這樣就不能釋放pool的連線資源
+            try {
+                await client.query('ROLLBACK');
+            } catch {}
+        }
+
+        const msg = err instanceof Error ? err.message : String(err);
+
+        console.error("[api:user/enable2fa] error:", msg, err);
+
+        return res.status(500).json({
+            ok: false,
+            error: "系統錯誤"
+        });
+    } finally {
+        // [交易] 結束釋放路線
+        if (client) client.release();
+    }
 }

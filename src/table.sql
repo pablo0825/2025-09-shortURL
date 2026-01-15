@@ -275,3 +275,6 @@
 -- CREATE INDEX IF NOT EXISTS idx_user_backup_codes_user_version_unused
 --     ON user_backup_codes(user_id, version)
 --     WHERE used_at IS NULL;
+
+-- 2026/01/09
+-- ALTER TABLE users ADD COLUMN twofa_backup_codes_version int not null default 0;

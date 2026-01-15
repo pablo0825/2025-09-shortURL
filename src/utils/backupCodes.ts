@@ -19,6 +19,8 @@ export function generteBackupCodes(count:number = 10):string[] {
     return codes;
 }
 
+console.log(generteBackupCodes())
+
 // hash backup codes
 export async function hashBackupCodes (codes:string[]):Promise<string[]> {
     const saltRounds = 10;
@@ -36,9 +38,10 @@ export async function consumBackupCodes (code:string, storedHashes:string[]) {
 
         if(ok) {
             // backup code使用後從storedHashes中移除
-            const newHashes:string[] = storedHashes.filter((_, idx) => idx !== i);
+            // const usedCode:string = storedHashes.filter((_, idx) => idx === i);
+            const usedCode:string = storedHashes[i];
 
-            return {ok:true, hashes: newHashes};
+            return {ok:true, hash: usedCode};
         }
     }
 

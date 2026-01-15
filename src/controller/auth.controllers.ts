@@ -4,7 +4,14 @@ import type {PoolClient} from "pg";
 import {pool} from "../pool";
 import {jwtProvider} from "../utils/jwtProvider";
 import {redisProvider} from "../utils/redisProvider";
-import {emailSchema, loginSchema, logoutTokenIdSchema, registerSchema, restPasswordSchema} from "../zod/auth.schema";
+import {
+    emailSchema,
+    login2faSchema,
+    loginSchema,
+    logoutTokenIdSchema,
+    registerSchema,
+    restPasswordSchema
+} from "../zod/auth.schema";
 import * as crypto from "node:crypto";
 import bcrypt from "bcrypt";
 import {handleAccessTokenBlackList} from "../utils/handleAccessTokenBlackList";
@@ -12,6 +19,11 @@ import {sendEmail} from "../email/sendEmail";
 import {writeUserLogToDB} from "../utils/writeUserLogToDB";
 import {UserLogActionEnum} from "../enum/userLogAction.enum";
 import {checkResetLock, clearResetFailures, recordResetFailure} from "../utils/handlePasswordResetFailure"
+import {signTwofaToken, verifyTwofaToken} from "../utils/jwtTwofaToken";
+import {verifyTotpCode} from "../utils/totp";
+import {decrypt} from "../utils/cyptoUtils";
+import {consumBackupCodes} from "../utils/backupCodes";
+import redis from "../redis/redisClient";
 
 const jwtAuthTool = new jwtProvider();
 const redisAuthTool = new redisProvider();
@@ -169,7 +181,7 @@ export const login = async (req: Request, res: Response) => {
 
     try {
         // 查user
-        const user = await pool.query<{id:number, email:string, password_hash:string, nickname:string}>('SELECT id, email, password_hash, nickname FROM users WHERE email = $1 AND is_active = TRUE', [email]);
+        const user = await pool.query<{id:number, email:string, password_hash:string, nickname:string, twofa_enabled:boolean}>('SELECT id, email, password_hash, nickname, twofa_enabled FROM users WHERE email = $1 AND is_active = TRUE', [email]);
         if (user.rowCount === 0) {
             return res.status(401).json({
                 ok: false,
@@ -178,7 +190,7 @@ export const login = async (req: Request, res: Response) => {
         }
 
         // 把user的資料解包出來
-        const {id, password_hash, nickname, email: userEmail } = user.rows[0];
+        const {id, password_hash, nickname, email: userEmail, twofa_enabled:twofaEnabled } = user.rows[0];
 
         // 比對密碼
         const passwordCheck:boolean = await bcrypt.compare(password, password_hash);
@@ -186,6 +198,22 @@ export const login = async (req: Request, res: Response) => {
             return res.status(401).json({
                 ok: false,
                 error: "帳號或密碼錯誤，請重新輸入"
+            })
+        }
+
+        // 2fa驗證
+        if(twofaEnabled) {
+            const { token, jti, expiresInSec } = signTwofaToken(id);
+
+            // 把key, id存到redis中
+            await redis.set(`2fa:login:${jti}`, String(id), { EX: expiresInSec });
+
+            // 我猜這邊要回傳expires的原因是，要提醒使用者token幾分鐘後過期，在前端的部分
+            return res.status(200).json({
+                ok: true,
+                requires2FA: true,
+                twofaToken: token,
+                expiresInSec
             })
         }
 
@@ -267,7 +295,7 @@ export const login = async (req: Request, res: Response) => {
         return res.status(200).json({
             ok: true,
             message: `${nickname} 使用者登入成功`,
-            accessToken,
+            accessToken:accessToken,
             user: {
                 id:id,
                 email: userEmail,
@@ -297,6 +325,237 @@ export const login = async (req: Request, res: Response) => {
         });
     } finally {
         // [交易] 結束後，釋放連線資源
+        if (client) client.release();
+    }
+}
+
+
+export const login2fa = async (req:Request, res:Response) => {
+    const parsed = login2faSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+        const message = parsed.error.issues[0]?.message ?? "無效的資廖";
+        // 400 請求內容不正確
+        return res.status(400).json({
+            ok: false,
+            error: message
+        })
+    }
+
+    const input = parsed.data;
+
+   const {twofaToken, code, method} = input;
+
+    // 驗證 2fa token，取得userId
+    const params = verifyTwofaToken(twofaToken);
+
+    if (!params.ok) {
+        return res.status(401).json({
+            ok: false,
+            error: "2FA token 無效或已過期"
+        });
+    }
+
+    // 檢查token是否有唯一性
+    // 讀取key值，之後把key刪掉
+    const raw:string | null = await redis.getDel(`2fa:login:${params.jti}`);
+
+    // 檢查token是否過期，以及被使用過
+    if (!raw || Number(raw) !== params.userId) {
+        return res.status(401).json({ ok:false, error:"2FA token 已使用或已過期" });
+    }
+
+    const userId:number = params.userId;
+    let client: PoolClient | undefined;
+    let usedBackupCodeHash:string | null = null;
+
+    try {
+        // return email, nickname, twofa_enabled, version, encrypted, iv, authTag, role_type
+        // users, user_role
+        const userRes = await pool.query<{
+            email: string;
+            nickname: string;
+            twofa_enabled: boolean;
+            twofa_backup_codes_version: number | null;
+            twofa_secret_encrypted: Buffer | null;
+            twofa_secret_iv: Buffer | null;
+            twofa_secret_auth_tag: Buffer | null;
+            role_type: string | null;
+        }>('SELECT u.email, u.nickname, u.twofa_enabled, u.twofa_backup_codes_version, u.twofa_secret_encrypted, u.twofa_secret_iv, u.twofa_secret_auth_tag, r.type AS role_type FROM users u LEFT JOIN user_role ur ON ur.user_id = u.id LEFT JOIN role r ON r.id = ur.role_id WHERE u.id = $1 AND u.is_active = TRUE LIMIT 1', [userId]);
+
+        if (userRes.rowCount === 0) {
+            return res.status(404).json({ ok: false, error: "使用者不存在或資料異常" });
+        }
+
+        const {email, nickname, role_type:userRoleType, twofa_enabled:twofaEnabled} = userRes.rows[0];
+
+        // 確認2fa驗證有沒有啟用
+        if (!twofaEnabled) {
+            return res.status(400).json({ ok: false, error: "此帳號未啟用 2FA" });
+        }
+
+        if (!userRoleType) {
+            console.error(`[auth/login2fa] user ${userId} 找不到角色`);
+
+            return res.status(500).json({ ok: false, error: "系統錯誤，請稍後再試" });
+        }
+
+        // 檢查是totp或backup Code
+        if (method === "totp") {
+            const {twofa_secret_encrypted:encrypted, twofa_secret_iv:iv, twofa_secret_auth_tag:authTag} =userRes.rows[0];
+
+            // 檢查encrypted, iv, authTag是否存在
+            if (!encrypted || !iv || !authTag ) {
+                return res.status(400).json({ ok: false, error: "2FA 資料不完整，請重新設定" });
+            }
+
+            // 解出密碼
+            const secret:string = decrypt(encrypted, iv, authTag);
+            const isValid:boolean = verifyTotpCode(code, secret);
+
+            if (!isValid) {
+                return res.status(400).json({ ok: false, error: "驗證碼錯誤" });
+            }
+        } else if (method === "backup_code") {
+            const version:number | null = userRes.rows[0].twofa_backup_codes_version;
+
+            if (!version || version <= 0) {
+                return res.status(400).json({ ok: false, error: "尚未設定備用碼" });
+            }
+
+            // 找出符合條件的code
+            // 回傳值，會是物件陣列，因為有多筆code_hash
+            const backupRes = await pool.query<{code_hash: string}>('SELECT code_hash FROM user_backup_codes WHERE user_id = $1 AND version = $2 AND used_at IS NULL', [userId, version]);
+
+            if (backupRes.rowCount === 0) {
+                return res.status(400).json({ ok: false, error: "無有效的備用碼" });
+            }
+
+            // 把 rows 轉換成 string[]
+            const hashes:string[] = backupRes.rows.map((r) => r.code_hash);
+
+            //
+            const match = await consumBackupCodes(code, hashes);
+
+            if (!match.ok || !match.hash) {
+                return res.status(400).json({ ok: false, error: "驗證碼錯誤" });
+            }
+
+            // 把使用過的backupCode存起來
+            usedBackupCodeHash = match.hash;
+        }
+
+        // 驗證通過，開始發證
+        const accessToken = jwtAuthTool.generateAccessToken({
+            id: userId.toString(), name: nickname, email: email, role: userRoleType
+        });
+
+        const refreshToken = jwtAuthTool.generateRefreshToken(userId.toString());
+        const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
+
+        let expiresAt;
+        let tokenMaxAge:number = 7 * 24 * 60 * 60 * 1000;
+
+        // 解析新 token 的過期時間
+        try {
+            const decode = jwtAuthTool.verifyToken(refreshToken, "refresh");
+            const exp = decode.claims?.exp;
+
+            if (typeof exp === "number") {
+                expiresAt = new Date(exp * 1000);
+                const ttlMs = exp * 1000 - Date.now();
+                // 有個寶底，確保不為負數
+                tokenMaxAge = Math.max(0, ttlMs);
+            } else {
+                throw new Error("無法解析 exp");
+            }
+        } catch (err) {
+            console.error("[api:auth/login2fa] 無法解析新 token 的過期時間:", err);
+
+            return res.status(500).json({
+                ok: false,
+                error: "系統錯誤，請稍後再試"
+            });
+        }
+
+        // 準備設備資料
+        // ?? 左邊為空，則用右邊的值
+        const userAgent:string | null = req.get("user-agent") ?? null;
+        const userIp:string | undefined = req.ip; // [標註] 這種寫法可能會有問題，但先這樣
+        const lastUsedAt = new Date();
+
+        client = await pool.connect();
+        // 交易開始
+        await client.query('BEGIN');
+
+        // 寫入 Refresh Token
+        // 我記記一件事情，就是還沒插入值前，這筆資料不存在，自然也不會有id的出現
+        const insert =  await client.query<{id:number}>(`INSERT INTO refresh_token
+            (user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+                [userId, refreshTokenHash, userAgent, userIp, expiresAt, "", lastUsedAt]
+        );
+
+        const refreshTokenId = insert.rows[0].id;
+
+        // 如果是 Backup Code 登入，標記該碼已使用
+        if (usedBackupCodeHash) {
+            const consumed =  await client.query(
+                    `UPDATE user_backup_codes 
+                 SET used_at = NOW(), used_by_ip = $1, used_by_user_agent = $2 , used_by_session_id = $3
+                 WHERE user_id = $4 AND code_hash = $5 AND used_at IS NULL`,
+                    [userIp, userAgent, refreshTokenId, userId, usedBackupCodeHash]
+            );
+
+            if (consumed.rowCount === 0) {
+                // 失敗，結束交易
+                await client.query("ROLLBACK");
+
+                return res.status(400).json({ ok: false, error: "備用碼已使用或無效" });
+            }
+        }
+
+        // 更新最後登入時間
+        await client.query('UPDATE users SET last_login_at = $1 WHERE id = $2', [lastUsedAt, userId]);
+
+        // 成功，結束交易
+        await client.query('COMMIT');
+
+        // 7. 回應
+        res.cookie("refreshToken", refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            maxAge: tokenMaxAge,
+            sameSite: "lax",
+            path: "/",
+        });
+
+        return res.status(200).json({
+            ok: true,
+            message: `${nickname} 2FA 登入成功`,
+            accessToken: accessToken,
+            user: {
+                id: userId,
+                email: email,
+                name: nickname,
+                role: userRoleType,
+            },
+        });
+    } catch (err) {
+        if (client) {
+            try {
+                await client.query("ROLLBACK");
+            } catch (rollbackErr) {
+                console.error("[api:auth/login2fa] ROLLBACK 失敗:", rollbackErr);
+            }
+        }
+
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[api:auth/login2fa] error:", msg, err);
+
+        return res.status(500).json({ ok: false, error: "伺服器內部錯誤，登入失敗，請稍後再試" });
+    } finally {
+        // [交易] 最後釋放連線
         if (client) client.release();
     }
 }

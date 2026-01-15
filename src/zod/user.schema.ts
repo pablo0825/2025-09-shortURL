@@ -7,6 +7,8 @@ import {z} from "zod";
 // 3. 至少包含一個數字 (?=.*[0-9])
 // 4. 總長度至少為 6 位 (.{6,})
 const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{6,}$/;
+const codeRegex = /^\d{6}$/;
+const nonceRegex = /^[a-fA-F0-9]{32}$/;
 
 // coerce 字串轉數字
 export const userIdSchema = z.coerce.number().int("userId 必須是整數").positive("userId 必須是正數");
@@ -25,4 +27,9 @@ export const bodySchema = z.object({
     // refine 可以把data傳進去，進行條件運算
     error: "兩次輸入的新密碼必須相同",
     path: ["newPasswordAgain"],
+});
+
+export const codeAndNonceSchema = z.object({
+    code: z.string().regex(codeRegex, "code必須是6碼數字").min(6),
+    nonce: z.string().regex(nonceRegex, "nonce必須是長度為32且a-f, A-F, 0-9的字元").min(32)
 });
