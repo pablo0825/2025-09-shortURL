@@ -140,7 +140,7 @@ export const updateMyAvatar = async (req: Request, res: Response) => {
 
         // 把avatar的路徑，更新到users table的avatar_key欄位中
         // 加入頭像的更新時間
-        const updateResult = await client.query('UPDATE users SET avatar_key = $1, avatar_updated_at = now() WHERE id = $2', [avatarUrl, userIdNum]);
+        const updateResult = await client.query('UPDATE users SET avatar_key = $1, avatar_updated_at = now() WHERE id = $2 AND is_active = TRUE', [avatarUrl, userIdNum]);
 
         if (updateResult.rowCount === 0) {
             // [交易] 失敗，結束
@@ -424,10 +424,9 @@ export const setup2fa = async (req:Request, res:Response) => {
     //
     const secret:string = generateTotpSecret();
     const issuer:string = "MyApp";
-    const accountName:string = userEmail;
 
     //
-    const otpauthUrl:string = buildOtpAuthUrl(issuer, accountName, secret);
+    const otpauthUrl:string = buildOtpAuthUrl(issuer, userEmail, secret);
     //
     let qrDataUrl:string;
 
@@ -474,7 +473,7 @@ export const setup2fa = async (req:Request, res:Response) => {
     return res.json({
         ok:true,
         qrCode:qrDataUrl,
-        expiresInSec: 600,
+        expiresInSec: ttlSec,
         randomCode:nonce
     });
 };
@@ -578,7 +577,7 @@ export const enable2fa = async (req:Request, res:Response) => {
 
         // 查 users table 的 version
         // 上鎖，避免併發修改，確保取出最新的version
-        const userVersion = await client.query<{twofa_backup_codes_version:number}>('SELECT twofa_backup_codes_version FROM users WHERE id = $1 FOR UPDATE ', [userId]);
+        const userVersion = await client.query<{twofa_backup_codes_version:number}>('SELECT twofa_backup_codes_version FROM users WHERE id = $1 AND is_active = TRUE FOR UPDATE ', [userId]);
 
         if (userVersion.rowCount === 0) {
             return res.status(404).json({
@@ -634,3 +633,29 @@ export const enable2fa = async (req:Request, res:Response) => {
         if (client) client.release();
     }
 }
+
+// disable2fa
+export const disable2fa = async (req:Request, res:Response) => {
+    // 停用2fa
+    // users table要改的欄位有twofa_enabled=false, encrypted=null, iv=mull, authTag=null,  twofa_enabled_at=null, twofa_backup_codes_version=0
+    // 停用2fa後，把backup codes全部作廢，user_backup_codes table要改的欄位有，used_at，條件是user_id = userId, version=twofa_backup_codes_version, used_by_session=refresh_token_id(需要用ip去查，目前在哪個裝置)
+    // 用zod驗證userId，userIdParams =  userIdSchema.safeParse(req.user?.id);
+    // 檢查!userIdParams.success，true 往下執行; false，回傳401(未授權)，error:"未登入"
+    // userId = userIdParams.data; 把userId取出來
+    // 用try catch包住
+    // transaction，開啟交易
+    // 用userId作為key，去update user table的欄位，如:twofa_enabled=false, encrypted=null, iv=mull, authTag=null,  twofa_enabled_at=null, twofa_backup_codes_version=0，條件有is_active=true
+    // usersUpdate = client.query()
+    // if(usersUpdate.rowCount === 0) 檢查users table是否有更新成功，true，往下執行; false，return 404(未找到資源)，error:"使用者資料異常或不存在"
+    // 查詢refresh_token的id，要用ip當作篩選條件
+    // backup code的部分，因為有很多筆，該怎麼更新呢? 應該是符合條件的，就會進行更新
+    // 用userId作為key，update the columns in the user_backup_codes table，如:used_at=now()，條件是user_id = userId, version=twofa_backup_codes_version, used_by_session=refresh_token_id(需要用ip去查，目前在哪個裝置)
+    // userBackupCodesUpdate = client.query()
+    // return res 200(請求成功)，ok:true, message:2fa驗證已關閉
+}
+
+// softDeleteMyAccount
+// 刪除帳號
+
+// getMySessionsList
+// 讀取登入紀錄
