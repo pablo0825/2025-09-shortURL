@@ -79,3 +79,15 @@ ALTER TABLE refresh_token
   - 依 user 註銷所有 refresh tokens
 - `src/controller/user.controllers.ts:641-652`
   - 註解提到 `used_by_session_id = refresh_token_id`，以及用 ip 找 refresh_token id
+
+## 7) 完成修改
+
+- [x] user.controllers.ts:324 
+- [x] auth.controllers.ts:239-287
+- [x] auth.controllers.ts:453-525
+- [ ] auth.controllers.ts:569-654
+- [ ] auth.controllers.ts:716-725
+- [ ] auth.controllers.ts:770-840
+- [ ] auth.controllers.ts:880-893
+- [ ] auth.controllers.ts:947
+- [ ] auth.controllers.ts:1180

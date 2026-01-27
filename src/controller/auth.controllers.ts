@@ -274,8 +274,25 @@ export const login = async (req: Request, res: Response) => {
         // [交易] 開始
         await client.query('BEGIN')
 
+        // 2026-01-27
+        // 把 user_id, user_agent, ip_address, last_seen_at, reason 等欄位，插入到 session table 中，並返回 session_id
+        // 創建 session_id
+        const sessionResult =  await client.query<{id:number}>('INSERT INTO session (user_id, user_agent, ip_address, last_seen_at, reason, expires_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',[id, userAgent, userIp, lastUsedAt, "login", expiresAt]);
+
+        if (sessionResult.rowCount === 0) {
+            // 結束，交易失敗
+            await client.query('ROLLBACK');
+
+            return res.status(404).json({
+                ok: false,
+                error:"使用者不存在或資料異常"
+            })
+        }
+
+        const sessionId:number = sessionResult.rows[0].id;
+
         // 把refreshTokenHash存到refresh_token table中
-        await client.query('INSERT INTO refresh_token(user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at) VALUES ($1, $2, $3, $4, $5, $6, $7)', [id, refreshTokenHash, userAgent, userIp, expiresAt, "", lastUsedAt]);
+        await client.query('INSERT INTO refresh_token(user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at, session_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)', [id, refreshTokenHash, userAgent, userIp, expiresAt, "", lastUsedAt, sessionId]);
 
         // 更新最後登入時間
         await client.query('UPDATE users SET last_login_at = $1 WHERE id = $2', [lastUsedAt, id]);
@@ -488,15 +505,25 @@ export const login2fa = async (req:Request, res:Response) => {
         // 交易開始
         await client.query('BEGIN');
 
-        // 寫入 Refresh Token
-        // 我記記一件事情，就是還沒插入值前，這筆資料不存在，自然也不會有id的出現
-        const insert =  await client.query<{id:number}>(`INSERT INTO refresh_token
-            (user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-                [userId, refreshTokenHash, userAgent, userIp, expiresAt, "", lastUsedAt]
-        );
+        const sessionResult = await client.query<{id:number}>('INSERT INTO session (user_id, user_agent, ip_address, last_seen_at, reason, expires_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',[userId, userAgent, userIp, lastUsedAt, "login2fa", expiresAt]);
 
-        const refreshTokenId = insert.rows[0].id;
+        if (sessionResult.rowCount === 0) {
+            // 結束，交易失敗
+            await client.query('ROLLBACK');
+
+            return res.status(404).json({
+                ok: false,
+                error:"使用者不存在或資料異常"
+            })
+        }
+
+        const sessionId:number = sessionResult.rows[0].id;
+
+        await client.query(`INSERT INTO refresh_token
+            (user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at, session_id) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                [userId, refreshTokenHash, userAgent, userIp, expiresAt, "", lastUsedAt, sessionId]
+        );
 
         // 如果是 Backup Code 登入，標記該碼已使用
         if (usedBackupCodeHash) {
@@ -504,7 +531,7 @@ export const login2fa = async (req:Request, res:Response) => {
                     `UPDATE user_backup_codes 
                  SET used_at = NOW(), used_by_ip = $1, used_by_user_agent = $2 , used_by_session_id = $3
                  WHERE user_id = $4 AND code_hash = $5 AND used_at IS NULL`,
-                    [userIp, userAgent, refreshTokenId, userId, usedBackupCodeHash]
+                    [userIp, userAgent, sessionId, userId, usedBackupCodeHash]
             );
 
             if (consumed.rowCount === 0) {

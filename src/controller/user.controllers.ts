@@ -45,6 +45,7 @@ export const updateMyProfile = async (req: Request, res: Response) => {
     // rateLimit: 1小時，3次
 }
 
+// 更新個人頭像
 export const updateMyAvatar = async (req: Request, res: Response) => {
     let userIdNum:number;
     let userIdStr:string;
@@ -320,8 +321,10 @@ export const changeMyPassword = async (req: Request, res: Response) => {
             });
         }
 
+        // 2026-01-27 把 session table 的 revoked_at = now
         // 註銷所有裝置
         await client.query('UPDATE refresh_token SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL ', [userId]);
+        await client.query('UPDATE session SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL ', [userId]);
 
         // 更新user_log
         await writeUserLogToDB(userId, UserLogActionEnum.UPDATE_PASSWORD, {

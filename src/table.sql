@@ -278,3 +278,34 @@
 
 -- 2026/01/09
 -- ALTER TABLE users ADD COLUMN twofa_backup_codes_version int not null default 0;
+
+-- 2026-01-27
+-- 依據 sessionTable-2026-01-26 的建議進行修改
+-- 新增session table
+-- CREATE TABLE session (
+--     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+--     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+--     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+--     last_seen_at TIMESTAMPTZ NULL, -- 最後登入時間
+--     expires_at TIMESTAMPTZ NOT NULL, -- 創建時間
+--     revoked_at TIMESTAMPTZ NULL, -- 強制過期時間
+--     user_agent TEXT NULL, -- 裝置資訊
+--     ip_address INET NULL, -- ip地址
+--     device_info TEXT NULL, --
+--     reason TEXT NULL, -- 建立狀態建立或變更的原因，如login, logout等等
+--     CHECK (expires_at >= created_at)
+-- );
+--
+-- CREATE INDEX idx_session_user_id ON session(user_id);
+-- CREATE INDEX idx_session_expires_at ON session(expires_at);
+--
+-- -- 修改refresh_token table
+-- -- 加入 session_id
+-- ALTER TABLE refresh_token
+--     ADD COLUMN session_id BIGINT REFERENCES session(id) ON DELETE CASCADE;
+--
+-- CREATE INDEX idx_refresh_token_session_id ON refresh_token(session_id);
+--
+-- -- 把 session_id 設成，只能對應一筆的 refresh_token_id
+-- ALTER TABLE refresh_token
+--     ADD CONSTRAINT uq_refresh_token_session UNIQUE (session_id);
