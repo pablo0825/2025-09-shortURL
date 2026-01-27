@@ -593,7 +593,7 @@ export const refresh = async (req:Request, res:Response) => {
     // 變數區
     let client: PoolClient | undefined;
     let userId:number | null = null;
-    let matchedToken: {id:number, refresh_token_hash:string} | null = null;
+
     let expiresAt: Date | undefined;
     let tokenMaxAge = 7 * 24 * 60 * 60 * 1000; // 預設 7 天（毫秒）
 
@@ -630,15 +630,18 @@ export const refresh = async (req:Request, res:Response) => {
     // 獲取連線資源
     client = await pool.connect();
 
+    let matchedToken: {id:number, refresh_token_hash:string, session_id:number} | null = null;
+
     try {
         // [交易] 開始
         // 有關聯性的交易，全部需要綁在一起
         // 一起成功，或是一起失敗
         await client.query('BEGIN');
 
+        // 2026-01-27 修改
         // 取得refresh token table中的refresh_token_hash
         // 多裝置登入的情況下，會有多筆相同的userId存在，所以需要逐一比對
-        const storedRefreshToken = await client.query<{id:number, refresh_token_hash:string}>('SELECT id, refresh_token_hash FROM refresh_token WHERE user_id = $1 AND expires_at > now() AND revoked_at IS NULL LIMIT 10', [userId]);
+        const storedRefreshToken = await client.query<{id:number, refresh_token_hash:string, session_id:number}>('SELECT id, refresh_token_hash, session_id FROM refresh_token WHERE user_id = $1 AND expires_at > now() AND revoked_at IS NULL LIMIT 10', [userId]);
 
         if (storedRefreshToken.rowCount === 0) {
             // [交易] 失敗，返回
@@ -721,6 +724,16 @@ export const refresh = async (req:Request, res:Response) => {
             if (typeof exp === "number") {
                 expiresAt = new Date(exp * 1000);
                 const ttlMs = exp * 1000 - Date.now();
+
+                if (ttlMs <= 0) {
+                    await client.query('ROLLBACK');
+
+                    return res.status(500).json({
+                        ok: false,
+                        error: "系統錯誤，請稍後再試"
+                    });
+                }
+
                 tokenMaxAge = Math.max(0, ttlMs);
             } else {
                 throw new Error("無法解析 exp");
@@ -739,8 +752,23 @@ export const refresh = async (req:Request, res:Response) => {
         const userIp = req.ip; // [標主] 目前的ip取得方法，好像會有問題，但先這樣
         const lastUsedAt = new Date();
 
+        // 更新裝置的最後登入時間
+        const sessionResult = await client.query<{id:number}>('UPDATE session SET last_seen_at = $1, user_agent = $2, ip_address = $3, expires_at = $4 WHERE id = $5 RETURNING id', [lastUsedAt, userAgent, userIp, expiresAt, matchedToken.session_id]);
+
+        if (sessionResult.rowCount === 0) {
+            // 結束，交易失敗
+            await client.query('ROLLBACK');
+
+            return res.status(401).json({
+                ok: false,
+                error:"更新失敗，請重新登入"
+            })
+        }
+
+        const sessionId:number = sessionResult.rows[0].id;
+
         //  插入新的 refresh token
-        await client.query('INSERT INTO refresh_token(user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at) VALUES ($1, $2, $3, $4, $5, $6, $7)', [userId, newRefreshTokenHash, userAgent, userIp, expiresAt, "", lastUsedAt]);
+        await client.query('INSERT INTO refresh_token (user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at, session_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)', [userId, newRefreshTokenHash, userAgent, userIp, expiresAt, "", lastUsedAt, sessionId]);
 
         // 更新最後登入時間
         await client.query('UPDATE users SET last_login_at = $1 WHERE id = $2', [lastUsedAt, userId]);
