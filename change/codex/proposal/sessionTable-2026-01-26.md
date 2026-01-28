@@ -85,8 +85,8 @@ ALTER TABLE refresh_token
 - [x] user.controllers.ts:324 
 - [x] auth.controllers.ts:239-287
 - [x] auth.controllers.ts:453-525
-- [ ] auth.controllers.ts:569-654
-- [ ] auth.controllers.ts:716-725
+- [x] auth.controllers.ts:569-654
+- [x] auth.controllers.ts:716-725
 - [ ] auth.controllers.ts:770-840
 - [ ] auth.controllers.ts:880-893
 - [ ] auth.controllers.ts:947

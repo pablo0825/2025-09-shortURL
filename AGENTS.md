@@ -111,7 +111,7 @@ Then the agent MUST:
 
 1. Use the most recent Code Review content from the current session.
 2. Prepare a Markdown file under the following directory:
-   `docs/code-review/`
+   `docs/codex/code-review/`
 3. Filename format:
    `CR-<scope>-<YYYY-MM-DD>-<Version>.md`
 

@@ -822,8 +822,6 @@ export const refresh = async (req:Request, res:Response) => {
 export const logout = async (req:Request, res:Response) => {
     // 變數
     let userId:number;
-    let matchedToken: {id:number, refresh_token_hash: string} | null = null;
-
     const refreshToken:string = req.cookies?.refreshToken;
 
     if (!refreshToken) {
@@ -853,9 +851,15 @@ export const logout = async (req:Request, res:Response) => {
         });
     }
 
+    let matchedToken: {id:number, refresh_token_hash: string, session_id:number} | null = null;
+
+    let client: PoolClient | undefined;
+    // 獲取連線資源
+    client = await pool.connect();
+
     // 從refresh token table中找到匹配的token
     try {
-        const storedRefreshToken = await pool.query<{id:number, refresh_token_hash: string}>('SELECT id, refresh_token_hash FROM refresh_token WHERE user_id = $1 AND expires_at > now() AND revoked_at IS NULL LIMIT 10', [userId]);
+        const storedRefreshToken = await pool.query<{id:number, refresh_token_hash: string, session_id:number}>('SELECT id, refresh_token_hash, session_id FROM refresh_token WHERE user_id = $1 AND expires_at > now() AND revoked_at IS NULL LIMIT 10', [userId]);
 
         // 不存在也視為成功(幕等性)
         // 第一次呼叫logout api有可能已經成功了，但因為延遲的關係，所以還沒回傳
@@ -888,8 +892,16 @@ export const logout = async (req:Request, res:Response) => {
             })
         }
 
+        // 開始交易
+        await client.query('BEGIN');
+
         // 註銷refresh token
-        await pool.query('UPDATE refresh_token SET revoked_at = now() WHERE id = $1', [matchedToken.id]);
+        await client.query('UPDATE refresh_token SET revoked_at = now() WHERE id = $1', [matchedToken.id]);
+
+        await client.query('UPDATE session SET revoked_at = now(), reason = $1 WHERE id = $2 AND revoked_at IS NULL', ["logout", matchedToken.session_id]);
+
+        // [交易] 成功，結束
+        await client.query('COMMIT');
 
         // 清除cookie
         res.clearCookie("refreshToken");
@@ -902,12 +914,24 @@ export const logout = async (req:Request, res:Response) => {
             message: "登出成功"
         })
     } catch (err) {
+        if (client) {
+            // 多包一層try catch是為了讓finally可以被執行
+            // 如果沒有包的話，會停留在catch上
+            // 這樣就不能釋放pool的連線資源
+            try {
+                await client.query('ROLLBACK');
+            } catch {}
+        }
+
         const msg = err instanceof Error ? err.message : String(err);
         console.error("[api:auth/logout] error:", msg, err);
         return res.status(500).json({
             ok: false,
             error: "系統錯誤，請稍後再試"
         });
+    } finally {
+        // [交易] 最後釋放連線
+        if (client) client.release();
     }
 }
 
@@ -932,25 +956,31 @@ export const logoutAll = async (req:Request, res:Response) => {
         // [交易] 開始
         await client.query('BEGIN');
 
-        // 取得有效的refreshToken數量
-        const tokens = await client.query('SELECT refresh_token_hash FROM refresh_token WHERE user_id = $1 AND revoked_at IS NULL', [userId]);
-
-        // 註銷所有refreshToken
+        // 撤銷所有 refresh token
         await client.query('UPDATE refresh_token SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [userId]);
+
+        // 撤銷所有 session
+        const sessionCount = await client.query<{id:number}>('UPDATE session SET revoked_at = now(), reason = $1 WHERE user_id = $2 AND revoked_at IS NULL RETURNING id', ["logout_all", userId]);
 
         // [交易] 成功，結束
         await client.query('COMMIT');
 
-        // 額外:處理access token的黑名單
-        await handleAccessTokenBlackList(req);
-
         // 清除cookie
         res.clearCookie("refreshToken");
 
-        return res.status(200).json({
+        res.status(200).json({
             ok: true,
-            message: `已登出 ${tokens.rowCount} 個裝置`
+            message: `已登出 ${sessionCount.rowCount} 個裝置`
         });
+
+        // 最後處理黑名單的部分
+        try {
+            // 額外:處理access token的黑名單
+            await handleAccessTokenBlackList(req);
+        } catch (err) {
+            console.error("[api:auth/logoutAll] blacklist failed:", err);
+        }
+        return;
     } catch (err) {
         if (client) {
             // 多包一層try catch是為了讓finally可以被執行
