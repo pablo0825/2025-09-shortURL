@@ -5,6 +5,7 @@ import {pool} from "../pool";
 import {jwtProvider} from "../utils/jwtProvider";
 import {redisProvider} from "../utils/redisProvider";
 import {
+    emailSchema,
     login2faSchema,
     loginSchema,
     registerSchema,
@@ -930,6 +931,117 @@ export const logout = async (req:Request, res:Response) => {
     } finally {
         // [交易] 最後釋放連線
         if (client) client.release();
+    }
+}
+
+// [api] 忘記密碼
+export const forgotPassword = async (req:Request, res:Response) => {
+    let email:string;
+    let userId:number;
+    let nickname:string;
+
+    const result = emailSchema.safeParse(req.body?.email);
+
+    if (!result.success) {
+        const msg = result.error.issues[0]?.message ?? "無效的email";
+
+        return res.status(400).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    // toLowerCase() 把字串轉為小寫
+    email = result.data.trim().toLowerCase();
+
+    // token雜湊化
+    // crypto.randomBytes(32) 生成32個位元組
+    // toString("hex") 將32個位元組，轉換成十六進制的字串
+    const resetToken:string = crypto.randomBytes(32).toString("hex");
+    const hashToken:string = crypto.createHash("sha256").update(resetToken).digest("hex");
+
+    // 設定token的過期時間2小時
+    const tokenExpiry = new Date(Date.now() + 2 * 60 * 60 * 1000);
+
+    // 設定url
+    const resetURL = `${SHORT_BASE_URL}/reset-password?token=${resetToken}`;
+
+    try {
+        // 檢查帳號是否存在
+        const user = await pool.query('SELECT id, nickname FROM users WHERE email = $1', [email]);
+
+        if (user.rowCount === 0) {
+            // 回傳200，不要傳404，這樣外部人士就沒辦法猜到帳號是否存在
+            return res.status(200).json({
+                ok: true,
+                error:"如果該帳號存在，密碼重設郵件已發送"
+            })
+        }
+
+        userId = user.rows[0].id;
+        nickname = user.rows[0].nickname;
+
+        // 檢查user_log中是否有FORGOT_PASSWORD的紀錄
+        // 防洪機制
+        const lastReset = await pool.query(`SELECT COUNT(*) AS count FROM user_log WHERE action = $1 AND user_id = $2 AND created_at > now() - interval '5 minutes'`, [UserLogActionEnum.FORGOT_PASSWORD, userId]);
+
+        // SELECT COUNT(*) 永遠會回傳一列，所以rowCount永遠是1
+        // 所以要去讀row[0].count的值
+        const count:number = Number(lastReset.rows[0]?.count ?? 0);
+
+        if (count > 0) {
+            return res.status(429).json({
+                ok: false,
+                error: "請稍後再試，您已在 5 分鐘內請求過密碼重設"
+            })
+        }
+
+        // 將hashToken和過期時間存入users
+        await pool.query('UPDATE users SET reset_password_token = $1, reset_password_expires_at = $2 WHERE id = $3', [hashToken, tokenExpiry, userId]);
+
+        // HTML 郵件內容（使用反引號）
+        const html = `
+            <h2>重設密碼</h2>
+            <p>親愛的 ${nickname}：</p>
+            <p>我們收到了重設您密碼的請求。請點擊以下連結重設密碼：</p>
+            <p><a href="${resetURL}">${resetURL}</a></p>
+            <p>此連結將在 2 小時後失效。</p>
+            <p>若您未提出此要求，請忽略這封信。</p>
+        `;
+
+        const emailOptions = {
+            to: email,
+            subject:` ${nickname} 您的密碼重設通知`,
+            html: html,
+            text:`親愛的 ${nickname}：\n\n我們收到了重設您密碼的請求。請點擊以下連結重設密碼：\n\n${resetURL}\n\n此連結將在 2 小時後失效。\n\n如果您沒有請求此操作，請忽略此郵件。\n\n`,
+        }
+
+        // 寄出email
+        await sendEmail(emailOptions);
+
+        // 更新user_log
+        await writeUserLogToDB(userId, UserLogActionEnum.FORGOT_PASSWORD, {
+            detail:"使用者請求重設密碼",
+            metadata: {
+                name: nickname,
+            },
+            ipAddress: req.ip,
+            userAgent: req.get("user-agent") ?? null
+        });
+
+        return res.status(200).json({
+            ok: true,
+            message: "密碼重設郵件已發送，請檢查您的信箱",
+        });
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+
+        console.error("[api:auth/forgotPassword] error:", msg, err);
+
+        return res.status(500).json({
+            ok: false,
+            error: "系統錯誤"
+        });
     }
 }
 

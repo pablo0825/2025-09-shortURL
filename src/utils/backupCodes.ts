@@ -3,7 +3,7 @@ import crypto from "crypto";
 import bcrypt from "bcrypt";
 
 // 產生backup codes
-export function generteBackupCodes(count:number = 10):string[] {
+export function generateBackupCodes(count:number = 10):string[] {
     // Array.from 建立一個新的Array實體，指定長度為10，並透過map循環10次
     const codes:string[] = Array.from({length:count}).map(() => {
         // randomBytes 產生 4 bytes的隨機資料
@@ -18,8 +18,6 @@ export function generteBackupCodes(count:number = 10):string[] {
 
     return codes;
 }
-
-console.log(generteBackupCodes())
 
 // hash backup codes
 export async function hashBackupCodes (codes:string[]):Promise<string[]> {
