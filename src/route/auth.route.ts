@@ -19,7 +19,7 @@ router.post("/login", loginLimiter, login);
 router.post("/refresh", generalApiLimiter, refresh);
 router.post("/logout", logout);
 router.post("/logout-all", authenticate, logoutAll);
-router.post("/devices/:tokenId", authenticate, logoutDevice);
+router.post("/devices/:sessionId", authenticate, logoutDevice);
 router.post("/forgot-password", forgotPasswordLimiter, forgotPassword);
 router.post("/reset-password", resetPasswordLimiter, resetPassword);
 

@@ -22,11 +22,6 @@ export const loginSchema = z.object({
     password: z.string().regex(passwordRegex, "密碼必須至少包含一個大寫字母、一個小寫字母和一個數字。").min(6)
 });
 
-// coerce.number 強制把字串轉成數字
-// .int 驗證值是否為整數
-// .positive 驗證值是否為正數
-export const logoutTokenIdSchema = z.coerce.number().int("tokenId 必須是整數").positive("tokenId 必須是正整數");
-
 export const emailSchema = z.email();
 
 export const restPasswordSchema = z.object({

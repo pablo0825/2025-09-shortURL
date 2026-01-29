@@ -8,7 +8,7 @@ import sharp from "sharp";
 import fs from "fs/promises";
 import {writeUserLogToDB} from "../utils/writeUserLogToDB";
 import {UserLogActionEnum} from "../enum/userLogAction.enum";
-import {bodySchema, codeAndNonceSchema, userIdSchema} from "../zod/user.schema";
+import {bodySchema, codeAndNonceSchema, userIdSchema, logoutTokenIdSchema} from "../zod/user.schema";
 import {emailSchema} from "../zod/auth.schema";
 import bcrypt from "bcrypt";
 import {handleAccessTokenBlackList} from "../utils/handleAccessTokenBlackList";
@@ -662,3 +662,189 @@ export const disable2fa = async (req:Request, res:Response) => {
 
 // getMySessionsList
 // 讀取登入紀錄
+
+// [api] 登出功能(所有裝置)
+// [標註] 目前不知道怎麼解決accessToken的問題，因為我沒有紀錄它。
+// 但accessToken也沒有紀錄的必要，所以只要把當下那個裝置也關到黑名單就好
+export const logoutAll = async (req:Request, res:Response) => {
+    const userIdParams = userIdSchema.safeParse(req.user?.id);
+
+    if (!userIdParams.success) {
+        const msg = userIdParams.error.issues[0]?.message ?? "未登入"
+        return res.status(401).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userId = userIdParams.data;
+
+    let client: PoolClient | undefined;
+    // 從資料庫獲得一條單獨的連線
+    client = await pool.connect();
+
+    try {
+        // [交易] 開始
+        await client.query('BEGIN');
+
+        // 撤銷所有 refresh token
+        await client.query('UPDATE refresh_token SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [userId]);
+
+        // 撤銷所有 session
+        const sessionCount = await client.query<{id:number}>('UPDATE session SET revoked_at = now(), reason = $1 WHERE user_id = $2 AND revoked_at IS NULL RETURNING id', ["logout_all", userId]);
+
+        // [交易] 成功，結束
+        await client.query('COMMIT');
+
+        // 清除cookie
+        res.clearCookie("refreshToken");
+
+        res.status(200).json({
+            ok: true,
+            message: `已登出 ${sessionCount.rowCount} 個裝置`
+        });
+
+        // 最後處理黑名單的部分
+        try {
+            // 額外:處理access token的黑名單
+            await handleAccessTokenBlackList(req);
+        } catch (err) {
+            console.error("[api:auth/logoutAll] blacklist failed:", err);
+        }
+        return;
+    } catch (err) {
+        if (client) {
+            // 多包一層try catch是為了讓finally可以被執行
+            // 如果沒有包的話，會停留在catch上
+            // 這樣就不能釋放pool的連線資源
+            try {
+                await client.query('ROLLBACK');
+            } catch {}
+        }
+
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[api:auth/logoutAll] error:", msg, err);
+        return res.status(500).json({
+            ok: false,
+            error: "系統錯誤"
+        });
+    } finally {
+        if (client) client.release();
+    }
+}
+
+// [api] 指定裝置登出
+export const logoutDevice = async (req:Request, res:Response) => {
+    const userIdParams = userIdSchema.safeParse(req.user?.id);
+
+    if (!userIdParams.success) {
+        const msg = userIdParams.error.issues[0]?.message ?? "未登入"
+        return res.status(401).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userId = userIdParams.data;
+
+    // 取得refresh token
+    const refreshToken:string = req.cookies?.refreshToken;
+
+    const sessionIdParam = logoutTokenIdSchema.safeParse(req.params.sessionId);
+
+    if (!sessionIdParam.success) {
+        // .issues 這個陣列中包含所有驗證失敗的資訊
+        // ?.message 用?檢查issues[0]是否不存在，或是為null或undefined
+        // ?? 運算式，左側為空的話，則回傳右側值
+        const msg = sessionIdParam.error.issues[0]?.message ?? "tokenId 格式錯誤"
+        return res.status(400).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const sessionId:number = sessionIdParam.data;
+
+    let client: PoolClient | undefined;
+    // 從資料庫獲得一條單獨的連線
+    client = await pool.connect();
+
+    try {
+        // [交易] 開始
+        await client.query('BEGIN');
+
+        const result = await client.query('UPDATE session SET revoked_at = now(), reason = $1 WHERE id = $2 AND user_id = $3 AND revoked_at IS NULL', ["logout_device", sessionId, userId]);
+
+        // 檢查是否有更新資料
+        if (result.rowCount === 0) {
+            // 交易失敗
+            await client.query('ROLLBACK');
+
+            return res.status(404).json({
+                ok: false,
+                error: "裝置不存在、已登出或不屬於您"
+            })
+        }
+
+        // 先確定有 session ，才更新refresh token
+        await client.query('UPDATE refresh_token SET revoked_at = now() WHERE session_id = $1 AND user_id = $2 AND revoked_at IS NULL', [sessionId, userId]);
+
+        // [交易] 成功，結束
+        await client.query('COMMIT');
+
+        // 用session_id拿到refresh token
+        const refreshTokenParams = await pool.query<{refresh_token_hash:string}>('SELECT refresh_token_hash FROM refresh_token WHERE user_id = $1 AND session_id = $2', [userId, sessionId]);
+
+        if (refreshTokenParams.rowCount === 0) {
+            return res.status(200).json({
+                ok: true,
+                message: "裝置已登出"
+            });
+        }
+
+        const refreshTokenHash:string = refreshTokenParams.rows[0].refresh_token_hash;
+
+        // 先判斷 refresh token是否存在
+        if (refreshToken) {
+            const isMatch = await bcrypt.compare(refreshToken, refreshTokenHash);
+
+            if (isMatch) {
+                // 清除cookie
+                res.clearCookie("refreshToken");
+
+                // 最後處理黑名單的部分
+                try {
+                    // 額外:處理access token的黑名單
+                    await handleAccessTokenBlackList(req);
+                } catch (err) {
+                    console.error("[api:auth/logoutDevice] blacklist failed:", err);
+                }
+            }
+        }
+
+        return res.status(200).json({
+            ok: true,
+            message: "裝置已登出"
+        });
+    } catch (err) {
+        if (client) {
+            // 多包一層try catch是為了讓finally可以被執行
+            // 如果沒有包的話，會停留在catch上
+            // 這樣就不能釋放pool的連線資源
+            try {
+                await client.query('ROLLBACK');
+            } catch {}
+        }
+
+        const msg = err instanceof Error ? err.message : String(err);
+
+        console.error("[api:auth/logoutDevice] error:", msg, err);
+
+        return res.status(500).json({
+            ok: false,
+            error: "系統錯誤"
+        });
+    } finally {
+        if (client) client.release();
+    }
+}
