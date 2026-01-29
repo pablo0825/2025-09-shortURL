@@ -198,7 +198,7 @@
 --     (2, 11), (2, 12), (2, 13), (2, 14),
 --     (2, 15), (2, 16)
 
--- 2025/12/10
+-- -- 2025/12/10
 -- CREATE TYPE user_log_action_type AS ENUM (
 --     'FORGOT_PASSWORD',
 --     'RESET_PASSWORD',
@@ -209,7 +209,7 @@
 --     'LOGOUT',
 --     'REFRESH_TOKEN'
 --     );
---
+-- --
 -- CREATE TABLE user_log (
 --     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY ,
 --     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE , -- 外鍵
