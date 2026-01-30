@@ -309,3 +309,6 @@
 -- -- 把 session_id 設成，只能對應一筆的 refresh_token_id
 -- ALTER TABLE refresh_token
 --     ADD CONSTRAINT uq_refresh_token_session UNIQUE (session_id);
+
+-- 2026-01-30
+-- ALTER TABLE user_backup_codes ADD COLUMN revoked_at TIMESTAMPTZ NULL;

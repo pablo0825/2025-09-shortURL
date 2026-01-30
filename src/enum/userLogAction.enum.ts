@@ -11,4 +11,5 @@ export enum UserLogActionEnum {
     REFRESH_TOKEN = "REFRESH_TOKEN",
     SETUP_2FA = "SETUP_2FA",
     ENABLE_2FA = "ENABLE_2FA",
+    DISABLE_2FA = "DISABLE_2FA",
 }
