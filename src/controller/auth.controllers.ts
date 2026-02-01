@@ -23,6 +23,7 @@ import {verifyTotpCode} from "../utils/totp";
 import {decrypt} from "../utils/cyptoUtils";
 import {consumBackupCodes} from "../utils/backupCodes";
 import redis from "../redis/redisClient";
+import {parseUserAgentToDeviceInfo} from "../utils/deviceInfo";
 
 const jwtAuthTool = new jwtProvider();
 const redisAuthTool = new redisProvider();
@@ -266,6 +267,8 @@ export const login = async (req: Request, res: Response) => {
         const userAgent = req.get("user-agent") ?? null;
         const userIp = req.ip; // [標註] 這種寫法可能會有問題，但先這樣
         const lastUsedAt = new Date();
+        const deviceInfo = parseUserAgentToDeviceInfo(userAgent);
+        const deviceInfoText = JSON.stringify(deviceInfo);
 
         // 獲取連線資源
         client = await pool.connect();
@@ -276,7 +279,7 @@ export const login = async (req: Request, res: Response) => {
         // 2026-01-27
         // 把 user_id, user_agent, ip_address, last_seen_at, reason 等欄位，插入到 session table 中，並返回 session_id
         // 創建 session_id
-        const sessionResult =  await client.query<{id:number}>('INSERT INTO session (user_id, user_agent, ip_address, last_seen_at, reason, expires_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',[id, userAgent, userIp, lastUsedAt, "login", expiresAt]);
+        const sessionResult =  await client.query<{id:number}>('INSERT INTO session (user_id, user_agent, ip_address, last_seen_at, reason, expires_at, device_info) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',[id, userAgent, userIp, lastUsedAt, "login", expiresAt, deviceInfoText]);
 
         if (sessionResult.rowCount === 0) {
             // 結束，交易失敗
@@ -291,7 +294,7 @@ export const login = async (req: Request, res: Response) => {
         const sessionId:number = sessionResult.rows[0].id;
 
         // 把refreshTokenHash存到refresh_token table中
-        await client.query('INSERT INTO refresh_token(user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at, session_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)', [id, refreshTokenHash, userAgent, userIp, expiresAt, "", lastUsedAt, sessionId]);
+        await client.query('INSERT INTO refresh_token(user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at, session_id, device_info) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)', [id, refreshTokenHash, userAgent, userIp, expiresAt, "", lastUsedAt, sessionId, deviceInfoText]);
 
         // 更新最後登入時間
         await client.query('UPDATE users SET last_login_at = $1 WHERE id = $2', [lastUsedAt, id]);
@@ -499,12 +502,14 @@ export const login2fa = async (req:Request, res:Response) => {
         const userAgent:string | null = req.get("user-agent") ?? null;
         const userIp:string | undefined = req.ip; // [標註] 這種寫法可能會有問題，但先這樣
         const lastUsedAt = new Date();
+        const deviceInfo = parseUserAgentToDeviceInfo(userAgent);
+        const deviceInfoText = JSON.stringify(deviceInfo); // 寫入 device_info
 
         client = await pool.connect();
         // 交易開始
         await client.query('BEGIN');
 
-        const sessionResult = await client.query<{id:number}>('INSERT INTO session (user_id, user_agent, ip_address, last_seen_at, reason, expires_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',[userId, userAgent, userIp, lastUsedAt, "login2fa", expiresAt]);
+        const sessionResult = await client.query<{id:number}>('INSERT INTO session (user_id, user_agent, ip_address, last_seen_at, reason, expires_at, device_info) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',[userId, userAgent, userIp, lastUsedAt, "login2fa", expiresAt, deviceInfoText]);
 
         if (sessionResult.rowCount === 0) {
             // 結束，交易失敗
@@ -519,9 +524,9 @@ export const login2fa = async (req:Request, res:Response) => {
         const sessionId:number = sessionResult.rows[0].id;
 
         await client.query(`INSERT INTO refresh_token
-            (user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at, session_id) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-                [userId, refreshTokenHash, userAgent, userIp, expiresAt, "", lastUsedAt, sessionId]
+            (user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at, session_id, device_info) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+                [userId, refreshTokenHash, userAgent, userIp, expiresAt, "", lastUsedAt, sessionId, deviceInfoText]
         );
 
         // 如果是 Backup Code 登入，標記該碼已使用
@@ -750,9 +755,11 @@ export const refresh = async (req:Request, res:Response) => {
         const userAgent = req.get("user-agent") ?? null;
         const userIp = req.ip; // [標主] 目前的ip取得方法，好像會有問題，但先這樣
         const lastUsedAt = new Date();
+        const deviceInfo = parseUserAgentToDeviceInfo(userAgent);
+        const deviceInfoText = JSON.stringify(deviceInfo); // 寫入 device_info
 
         // 更新裝置的最後登入時間
-        const sessionResult = await client.query<{id:number}>('UPDATE session SET last_seen_at = $1, user_agent = $2, ip_address = $3, expires_at = $4 WHERE id = $5 RETURNING id', [lastUsedAt, userAgent, userIp, expiresAt, matchedToken.session_id]);
+        const sessionResult = await client.query<{id:number}>('UPDATE session SET last_seen_at = $1, user_agent = $2, ip_address = $3, expires_at = $4, device_info=$5 WHERE id = $6 RETURNING id', [lastUsedAt, userAgent, userIp, expiresAt, deviceInfoText, matchedToken.session_id]);
 
         if (sessionResult.rowCount === 0) {
             // 結束，交易失敗
@@ -767,7 +774,7 @@ export const refresh = async (req:Request, res:Response) => {
         const sessionId:number = sessionResult.rows[0].id;
 
         //  插入新的 refresh token
-        await client.query('INSERT INTO refresh_token (user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at, session_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)', [userId, newRefreshTokenHash, userAgent, userIp, expiresAt, "", lastUsedAt, sessionId]);
+        await client.query('INSERT INTO refresh_token (user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at, session_id, device_info) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)', [userId, newRefreshTokenHash, userAgent, userIp, expiresAt, "", lastUsedAt, sessionId, deviceInfoText]);
 
         // 更新最後登入時間
         await client.query('UPDATE users SET last_login_at = $1 WHERE id = $2', [lastUsedAt, userId]);
