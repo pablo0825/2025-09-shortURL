@@ -312,3 +312,7 @@
 
 -- 2026-01-30
 -- ALTER TABLE user_backup_codes ADD COLUMN revoked_at TIMESTAMPTZ NULL;
+
+-- 2026-02-02
+-- 在 users table 加入 job_tile, unit, phone 等欄位
+ALTER TABLE users ADD COLUMN job_title VARCHAR(100) NULL ,ADD COLUMN unit VARCHAR(100) NULL , ADD COLUMN phone VARCHAR(30) NULL ;

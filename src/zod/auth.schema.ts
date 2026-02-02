@@ -14,7 +14,7 @@ const backupCodeRegex = /^[A-Z0-9]{4}-[A-Z0-9]{4}$/;
 export const registerSchema = z.object({
     email: z.email(),
     password: z.string().regex(passwordRegex, "密碼必須至少包含一個大寫字母、一個小寫字母和一個數字。").min(6),
-    nickname: z.string().min(6, "使用者名稱至少6個字")
+    nickname: z.string().min(6, "使用者名稱至少6個字"),
 });
 
 export const loginSchema = z.object({

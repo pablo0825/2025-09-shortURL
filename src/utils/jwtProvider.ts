@@ -91,7 +91,6 @@ export class jwtProvider {
 
     // [功能2] 產生 refresh token
     public generateRefreshToken(raw: string): string {
-        console.log(raw);
         const id = RefreshPayloadSchema.parse(raw);
         const options: SignOptions = {
             // SignOptions["expiresIn"]表示的型別為string | number
