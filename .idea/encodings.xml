@@ -2,6 +2,7 @@
 <project version="4">
   <component name="Encoding">
     <file url="file://$PROJECT_DIR$/change/codex/proposal/sessionTable-2026-01-26.md" charset="ISO-8859-1" />
+    <file url="file://$PROJECT_DIR$/docs/codex/code-review/CR-admin-api-2026-02-03-v01.md" charset="UTF-16" />
     <file url="file://$PROJECT_DIR$/src/controller/user.controllers.ts" charset="UTF-16" />
   </component>
 </project>

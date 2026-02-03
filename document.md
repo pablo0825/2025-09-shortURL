@@ -223,19 +223,28 @@ ps:第三方登入還沒處理
 
 auth api 大多已經完成，如下，剩下驗證email的api，等完成user, admin的api在回來處理。
 
-user api:
-[x] 讀取個人資料 getMyProfile
-[x] 更新個人資料 updateMyProfile
-[x] 更新個人頭像 updateMyAvatar 
-[] 刪除個人頭像 deleteMyAvatar
-[x] 更新密碼 changeMyPassword 用post 
-[x]設定2fa驗證 setup2fa
-[x] 驗證2fa驗證 verify2fa
-[x] 停用2fa驗證 disable2fa
-[x] 刪除帳號 softDeleteMyAccount
-[x] 讀取登入紀錄 getMySessionsList
-[x] 登出指定裝置 logoutDevice
-[x] 登出全部裝置 logoutAll
+### user api:
 
+- [x] 讀取個人資料 getMyProfile
+- [x] 更新個人資料 updateMyProfile
+- [x] 更新個人頭像 updateMyAvatar 
+- [ ] 刪除個人頭像 deleteMyAvatar
+- [x] 更新密碼 changeMyPassword 用post 
+- [x]設定2fa驗證 setup2fa
+- [x] 驗證2fa驗證 verify2fa
+- [x] 停用2fa驗證 disable2fa
+- [x] 刪除帳號 softDeleteMyAccount
+- [x] 讀取登入紀錄 getMySessionsList
+- [x] 登出指定裝置 logoutDevice
+- [x] 登出全部裝置 logoutAll
 
+### admin api:
+- [ ] 查詢所有使用者
+- [ ] 軟刪除使用者
+- [ ] 恢復使用者
+- [ ] 設定角色權限
+- [ ] 分配角色給使用者
+- [ ] 查詢所有link
+- [ ] 停用任何link
+- [ ] 查看統計資料
 
