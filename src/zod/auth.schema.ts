@@ -10,6 +10,8 @@ const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{6,}$/;
 const twofaTokenRegex = /^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/;
 const codeRegex = /^\d{6}$/;
 const backupCodeRegex = /^[A-Z0-9]{4}-[A-Z0-9]{4}$/;
+// 開頭09，後面需要8碼
+const phoneRegex = /^09\d{8}$/;
 
 export const registerSchema = z.object({
     email: z.email(),

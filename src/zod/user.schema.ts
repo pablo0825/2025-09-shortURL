@@ -1,5 +1,6 @@
 // user.schema.ts
 import {z} from "zod";
+import {updateMyProfile} from "../controller/user.controllers";
 
 // 這個正規表達式用於檢查字串是否滿足以下三個條件：
 // 1. 至少包含一個大寫英文字母 (?=.*[A-Z])
@@ -9,6 +10,8 @@ import {z} from "zod";
 const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{6,}$/;
 const codeRegex = /^\d{6}$/;
 const nonceRegex = /^[a-fA-F0-9]{32}$/;
+// 開頭09，後面需要8碼
+const phoneRegex = /^09\d{8}$/;
 
 // coerce 字串轉數字
 export const userIdSchema = z.coerce.number().int("userId 必須是整數").positive("userId 必須是正數");
@@ -38,3 +41,11 @@ export const codeAndNonceSchema = z.object({
 // .int 驗證值是否為整數
 // .positive 驗證值是否為正數
 export const logoutTokenIdSchema = z.coerce.number().int("tokenId 必須是整數").positive("tokenId 必須是正整數");
+
+
+export const myProfileSchema = z.object({
+    nickname: z.string().min(6, "使用者名稱至少6個字"),
+    jobTitle: z.string().min(1, "職稱至少兩個字"),
+    unit: z.string().min(1, "單位名稱至少兩個字"),
+    phone: z.string().regex(phoneRegex, "手機格式錯誤").min(10),
+});

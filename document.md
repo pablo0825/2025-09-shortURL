@@ -224,21 +224,18 @@ ps:第三方登入還沒處理
 auth api 大多已經完成，如下，剩下驗證email的api，等完成user, admin的api在回來處理。
 
 user api:
-1. 讀取個人資料 getMyProfile
-2. 更新個人資料 updateMyProfile
-3. 更新個人頭像 updateMyAvatar
-4. 刪除個人頭像 deleteMyAvatar
-5. 更新密碼 changeMyPassword 用post
-6. 設定2fa驗證 setup2fa
-7. 驗證2fa驗證 verify2fa
-8. 停用2fa驗證 disable2fa
-9. 刪除帳號 softDeleteMyAccount
-10. 讀取登入紀錄 getMySessionsList
-11. 登出指定裝置 logoutDevice
-12. 登出全部裝置 logoutAll
+[x] 讀取個人資料 getMyProfile
+[x] 更新個人資料 updateMyProfile
+[x] 更新個人頭像 updateMyAvatar 
+[] 刪除個人頭像 deleteMyAvatar
+[x] 更新密碼 changeMyPassword 用post 
+[x]設定2fa驗證 setup2fa
+[x] 驗證2fa驗證 verify2fa
+[x] 停用2fa驗證 disable2fa
+[x] 刪除帳號 softDeleteMyAccount
+[x] 讀取登入紀錄 getMySessionsList
+[x] 登出指定裝置 logoutDevice
+[x] 登出全部裝置 logoutAll
 
-ps: logoutAll, logoutDevice等，目前放在auth route中，之後要搬到user route裡面。
-
-要修改suers table的欄位
 
 
