@@ -7,7 +7,7 @@ const jwtAuthTool = new jwtProvider();
 const redisAuthTool = new redisProvider();
 
 export async function authenticate (req: Request, res: Response, next:NextFunction)  {
-    // authHeader = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
+    // "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
     const authHeader = req.headers.authorization;
     // startsWith 用來檢查字串是否用指定的輟詞開頭，像是Bearer
     if (!authHeader?.startsWith("Bearer ")) {
@@ -18,6 +18,7 @@ export async function authenticate (req: Request, res: Response, next:NextFuncti
     }
 
     // .split(" ") 表示用空白作為分割，得到一個陣列
+    // [Bearer, eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...]
     // [1] 取得陣列中的第二個元素
     const accessToken = authHeader && authHeader.split(" ")[1];
     if (!accessToken) {

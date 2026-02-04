@@ -228,7 +228,7 @@ auth api 大多已經完成，如下，剩下驗證email的api，等完成user, 
 - [x] 讀取個人資料 getMyProfile
 - [x] 更新個人資料 updateMyProfile
 - [x] 更新個人頭像 updateMyAvatar 
-- [ ] 刪除個人頭像 deleteMyAvatar
+- [x] 刪除個人頭像 deleteMyAvatar
 - [x] 更新密碼 changeMyPassword 用post 
 - [x]設定2fa驗證 setup2fa
 - [x] 驗證2fa驗證 verify2fa
