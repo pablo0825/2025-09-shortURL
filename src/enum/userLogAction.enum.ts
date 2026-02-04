@@ -12,4 +12,5 @@ export enum UserLogActionEnum {
     SETUP_2FA = "SETUP_2FA",
     ENABLE_2FA = "ENABLE_2FA",
     DISABLE_2FA = "DISABLE_2FA",
+    DELETE_AVATAR = "DELETE_AVATAR",
 }
