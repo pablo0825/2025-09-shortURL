@@ -304,7 +304,7 @@ export const login = async (req: Request, res: Response) => {
 
         // 8) 設置 cookie
         res.cookie("refreshToken", refreshToken, {
-            httpOnly: true, // 防止XSS攻擊
+            httpOnly: true, // 防止XSS攻擊，cookie沒辦法讀到js的程式碼
             secure: process.env.NODE_ENV === "production",
             maxAge: tokenMaxAge, // token過期時間
             sameSite: "lax", // 防止CSRF攻擊

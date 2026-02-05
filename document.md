@@ -239,12 +239,20 @@ auth api 大多已經完成，如下，剩下驗證email的api，等完成user, 
 - [x] 登出全部裝置 logoutAll
 
 ### admin api:
-- [ ] 查詢所有使用者
-- [ ] 軟刪除使用者
-- [ ] 恢復使用者
-- [ ] 設定角色權限
-- [ ] 分配角色給使用者
-- [ ] 查詢所有link
-- [ ] 停用任何link
-- [ ] 查看統計資料
+- [ ] 查詢所有使用者 getAllUserList
+- [ ] 查詢指定使用者 getUser
+- [ ] 查詢指定使用者的裝置 getUserSession
+- [ ] 重置指定使用者的2fa驗證 
+- [ ] 軟刪除使用者 softDeleteUser
+- [ ] 恢復使用者 restoreUser
+- [ ] 取得角色權限 getRolePermission
+- [ ] 設定角色權限 manageRolePermission
+- [ ] 分配角色給使用者 assignRolesToUser
+- [ ] 查詢所有link getAllLink
+- [ ] 查詢指定link getLink
+- [ ] 停用指定link DeactivateLink
+- [ ] 查詢log 
+- [ ] 查詢使用者統計資料
+- [ ] 查詢link統計資料
+- [ ] 
 
