@@ -316,3 +316,31 @@
 -- 2026-02-02
 -- 在 users table 加入 job_tile, unit, phone 等欄位
 -- ALTER TABLE users ADD COLUMN job_title VARCHAR(100) NULL ,ADD COLUMN unit VARCHAR(100) NULL , ADD COLUMN phone VARCHAR(30) NULL ;
+
+-- 2026-02-06
+-- CREATE TABLE admin_audit_logs (
+--     id BIGSERIAL PRIMARY KEY,
+--     actor_user_id BIGINT NOT NULL, -- 操作者id
+--     actor_role VARCHAR(50) NOT NULL, -- 操作者角色
+--     action VARCHAR(100) NOT NULL, -- 操作動作，如:使用者停用
+--     target_type VARCHAR(50) NOT NULL, -- 目標類型，如user, link, admin
+--     target_id BIGINT, -- 目標id
+--     target_display VARCHAR(255), -- 人類可讀的目標名稱
+--     request_path TEXT NOT NULL, -- api路徑
+--     request_method VARCHAR(10) NOT NULL, -- http的那種動作，get, put等等
+--     request_ip INET, -- 操作者ip
+--     user_agent TEXT, -- 操作者裝置
+--     status VARCHAR(20) NOT NULL, -- 結果（success / failed）
+--     error_message TEXT, -- 失敗原因
+--     diff JSONB, --變更內容
+--     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW() -- 創建時間
+-- );
+--
+-- CREATE INDEX idx_admin_audit_logs_created_at
+--     ON admin_audit_logs (created_at);
+--
+-- CREATE INDEX idx_admin_audit_logs_actor_time
+--     ON admin_audit_logs (actor_user_id, created_at);
+--
+-- CREATE INDEX idx_admin_audit_logs_target_time
+--     ON admin_audit_logs (target_type, target_id, created_at);

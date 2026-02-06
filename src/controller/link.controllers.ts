@@ -291,6 +291,7 @@ export const getAllLinks = async (req: Request, res: Response) => {
         const rawPageSize:number = Number(req.query.pageSize ?? 30);
 
         // .isFinite 判斷是否為有限值
+        // page是否為有限值, 是否大於0，避免有小數點，所以用floor向上取整
         const page:number = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
         const clamped:number =
             Number.isFinite(rawPageSize) && rawPageSize > 0 ? Math.floor(rawPageSize) : 30;
@@ -301,6 +302,7 @@ export const getAllLinks = async (req: Request, res: Response) => {
         const includeExpired = req.query.includeExpired === "true";
         const includeInactive = req.query.includeInactive === "true";
 
+        // 決定要跳過幾筆資料，像是 (1-1=0)*30, (2-1=1)*30
         const offset:number = (page - 1) * pageSize;
 
         // 動態條件
