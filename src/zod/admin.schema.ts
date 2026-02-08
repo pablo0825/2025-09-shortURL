@@ -6,6 +6,17 @@ export const userIdSchema = z.coerce.number().int("userId 必須是整數").posi
 
 export const userRoleSchema = z.enum(["admin", "assistant"])
 
+// .preprocess 在正式驗證前，先做一次預處理
+const queryBooleanSchema = z.preprocess((v) => {
+    if (typeof v === "boolean") return v;
+    if (typeof v === "string") {
+        const s = v.trim().toLowerCase();
+        if (s === "true") return true;
+        if (s === "false") return false;
+    }
+    return v;
+}, z.boolean());
+
 export const usersListSchema = z.object({
     // 頁數&筆數限制
     page:z.coerce.number().int("page 必須是整數").min(1).default(1),
@@ -14,9 +25,9 @@ export const usersListSchema = z.object({
     sortBy: z.enum(["created_at", "last_login_at", "email", "nickname"]).default("created_at"), // 按照哪個欄位排序
     sortOrder: z.enum(["asc", "desc"]).default("desc"),// asc=由小到大, desc=由大到小
     // 篩選條件
-    includeInactive:z.coerce.boolean().default(false),
+    includeInactive:queryBooleanSchema.default(false),
     // .optional() 可以不傳參數
     role: z.enum(["admin", "assistant", "user"]).optional(),
-    twofa_enabled: z.coerce.boolean().optional(),
+    twofa_enabled: queryBooleanSchema.optional(),
     q: z.string().trim().min(1).optional() // 模糊搜尋
 });
