@@ -4,6 +4,8 @@ import {number, z} from "zod";
 // coerce 字串轉數字
 export const userIdSchema = z.coerce.number().int("userId 必須是整數").positive("userId 必須是正數");
 
+export const userRoleSchema = z.enum(["admin", "assistant"])
+
 export const usersListSchema = z.object({
     // 頁數&筆數限制
     page:z.coerce.number().int("page 必須是整數").min(1).default(1),

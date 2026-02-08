@@ -312,12 +312,12 @@
 
 -- 2026-01-30
 -- ALTER TABLE user_backup_codes ADD COLUMN revoked_at TIMESTAMPTZ NULL;
-
--- 2026-02-02
--- 在 users table 加入 job_tile, unit, phone 等欄位
+--
+-- -- 2026-02-02
+-- -- 在 users table 加入 job_tile, unit, phone 等欄位
 -- ALTER TABLE users ADD COLUMN job_title VARCHAR(100) NULL ,ADD COLUMN unit VARCHAR(100) NULL , ADD COLUMN phone VARCHAR(30) NULL ;
-
--- 2026-02-06
+--
+-- -- 2026-02-06
 -- CREATE TABLE admin_audit_logs (
 --     id BIGSERIAL PRIMARY KEY,
 --     actor_user_id BIGINT NOT NULL, -- 操作者id
@@ -335,7 +335,7 @@
 --     diff JSONB, --變更內容
 --     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW() -- 創建時間
 -- );
---
+-- --
 -- CREATE INDEX idx_admin_audit_logs_created_at
 --     ON admin_audit_logs (created_at);
 --
