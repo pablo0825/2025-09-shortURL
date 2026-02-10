@@ -17,3 +17,13 @@ export type LinkLog = {
     log_info:Json;
     created_at:Date | string;
 };
+
+export type SessionListItem = {
+    id: number;
+    last_seen_at: Date | null;
+    userAgent: string | null;
+    ip_address: string | null;
+    device_info: string | null;
+    status: "expired" | "inactive" | "active";
+    current?: boolean;
+};

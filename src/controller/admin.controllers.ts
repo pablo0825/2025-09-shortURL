@@ -1,10 +1,15 @@
 // admin.controllers.ts
-import {Request, Response} from "express";
+import express, {Request, Response} from "express";
 import type {PoolClient} from "pg";
 import {pool} from "../pool";
 import {writeAdminAuditLogToDb} from "../utils/writeAdminAuditLogToDb";
 import {usersListSchema, userIdSchema, userRoleSchema} from "../zod/admin.schema";
 import {AuditRequestMethod, AuditStatus, AuditTargetType}  from "../enum/audit";
+import {SessionListItem} from "../type/types";
+import multer from "multer";
+import {handleAccessTokenBlackList} from "../utils/handleAccessTokenBlackList";
+import {writeUserLogToDB} from "../utils/writeUserLogToDB";
+import {UserLogActionEnum} from "../enum/userLogAction.enum";
 
 export const getUsers = async (req: Request, res: Response) => {
     const userIdParams = userIdSchema.safeParse(req.user?.id);
@@ -355,4 +360,724 @@ export const getUser = async(req:Request, res:Response) => {
     }
 }
 
-// 修改指定使用者資料
+// 取得指定使用者的 sessions
+export const getUserSessions = async(req:Request, res:Response) => {
+    const userIdParams = userIdSchema.safeParse(req.user?.id);
+
+    if (!userIdParams.success) {
+        const msg:string = userIdParams.error.issues[0]?.message ?? "未登入";
+        return res.status(401).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userId:number = userIdParams.data;
+
+    const userRoleParams = userRoleSchema.safeParse(req.user?.role);
+
+    if(!userRoleParams.success) {
+        const msg:string = userRoleParams.error.issues[0]?.message ?? "權限不足";
+        return res.status(403).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userRole:"admin" | "assistant" = userRoleParams.data;
+
+    const targetIdParams = userIdSchema.safeParse(req.params.id);
+
+    if (!targetIdParams.success) {
+        const msg:string = targetIdParams.error.issues[0]?.message ?? "非法id";
+        return res.status(400).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const targetId = targetIdParams.data;
+
+    try {
+        // 用 last_seen_at, id 穩定資料，讓每次回傳順序相同
+        // nulls last 是指，把 last_seen_at 為 null 的值，放在最後
+        const sessionResult = await pool.query<{
+            id:number;
+            last_seen_at:Date | null;
+            expires_at:Date;
+            user_agent:string | null;
+            ip_address:string | null;
+            device_info:string | null;
+        }>('SELECT id, last_seen_at, expires_at, user_agent, ip_address, device_info FROM session WHERE user_id = $1 AND revoked_at IS NULL ORDER BY last_seen_at DESC NULLS LAST , id DESC ', [targetId]);
+
+        if (sessionResult.rowCount === 0) {
+            return res.status(200).json({
+                ok: true,
+                message:"尚無裝置紀錄",
+                data:[]
+            })
+        }
+
+        let sessionList:SessionListItem[] = [];
+
+        // 30天
+        const inactiveMs = 30 * 24 * 60 * 60 * 1000;
+        // 現在的時間
+        const now = Date.now();
+        // 最後登入的時間
+
+        for (const sessionRow of sessionResult.rows ) {
+            // 過期時間
+            // 過期時間小於現在，等於已過期
+            const isExpired:boolean = sessionRow.expires_at.getTime() < now;
+
+            let status:"expired" | "inactive" | "active";
+
+            if (isExpired) {
+                status = "expired";
+            } else if (!sessionRow.last_seen_at) {
+                // last_seen_at 不存在的話，就直接把 status 設成inactive
+                status = "inactive";
+            } else {
+                // 最後登入的時間
+                const lastSeenMs = sessionRow.last_seen_at.getTime();
+
+                status = now - lastSeenMs > inactiveMs ? "inactive" : "active";
+            }
+
+            sessionList.push({
+                id: sessionRow.id,
+                last_seen_at: sessionRow.last_seen_at,
+                userAgent:sessionRow.user_agent,
+                ip_address:sessionRow.ip_address,
+                device_info:sessionRow.device_info,
+                status: status,
+            });
+        }
+
+        res.status(200).json({
+            ok: true,
+            message: `讀取 ${sessionList.length} 個裝置`,
+            data: sessionList
+        })
+
+        const input = {
+            actorUserId:userId,
+            actorRole:userRole,
+            action:"get_user_sessions",
+            targetType:AuditTargetType.User,
+            targetId: targetId,
+            targetDisplay:"",
+            requestPath:req.originalUrl,
+            requestMethod:AuditRequestMethod.GET,
+            requestIp:req.ip,
+            userAgent:req.get("user-agent") ?? null,
+            status: AuditStatus.Success,
+            errorMessage: null,
+            diff: {} // diff 檢查前後變化的物件，所以 getUsers 可以不用填
+        }
+
+        // 讀取使用者列表，不是重要操作，audit log 的寫入可以放在最後
+        await writeAdminAuditLogToDb(input);
+
+        return;
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+
+        console.error("[api:admin/getUserSessions] error:", msg, err);
+
+        res.status(500).json({
+            ok: false,
+            error: "系統錯誤"
+        })
+
+        const input = {
+            actorUserId:userId,
+            actorRole:userRole,
+            action:"get_user_sessions",
+            targetType:AuditTargetType.User,
+            targetId: targetId,
+            targetDisplay:"",
+            requestPath:req.originalUrl,
+            requestMethod:AuditRequestMethod.GET,
+            requestIp:req.ip,
+            userAgent:req.get("user-agent") ?? null,
+            status: AuditStatus.Failed,
+            errorMessage: msg,
+            diff: {}
+        }
+
+        // 讀取使用者列表，不是重要操作，audit log 的寫入可以放在最後
+        await writeAdminAuditLogToDb(input);
+
+        return;
+    }
+}
+
+export const resetUser2FA = async (req:Request, res:Response) => {
+    const userIdParams = userIdSchema.safeParse(req.user?.id);
+
+    if (!userIdParams.success) {
+        const msg:string = userIdParams.error.issues[0]?.message ?? "未登入";
+        return res.status(401).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userId:number = userIdParams.data;
+
+    const userRoleParams = userRoleSchema.safeParse(req.user?.role);
+
+    if(!userRoleParams.success) {
+        const msg:string = userRoleParams.error.issues[0]?.message ?? "權限不足";
+        return res.status(403).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userRole:"admin" | "assistant" = userRoleParams.data;
+
+    const targetIdParams = userIdSchema.safeParse(req.params.id);
+
+    if (!targetIdParams.success) {
+        const msg:string = targetIdParams.error.issues[0]?.message ?? "非法id";
+        return res.status(400).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const targetId = targetIdParams.data;
+
+    let client: PoolClient | undefined;
+
+    try {
+        client = await pool.connect();
+        // [Transaction] 開啟交易
+        await client.query('BEGIN');
+
+        // 上鎖
+        // 查詢 users table 中的 version
+        const usersResult = await client.query<{
+            twofa_backup_codes_version:number,
+            twofa_enabled:boolean,
+            twofa_enabled_at:string | null,
+        }>('SELECT twofa_backup_codes_version, twofa_enabled, twofa_enabled_at FROM users WHERE id = $1 AND is_active = TRUE FOR UPDATE', [targetId]);
+
+        const count:number = usersResult.rowCount ?? 0;
+
+        if (count === 0) {
+            await client.query('ROLLBACK');
+
+            return res.status(404).json({
+                ok: false,
+                error:"使用者不存在或資料異常"
+            })
+        }
+
+        const oldVersion:number = usersResult.rows[0].twofa_backup_codes_version;
+
+        // 更新 users table 中跟 2fa 有關的欄位
+        const usersUpdate = await client.query<{
+            twofa_backup_codes_version:number,
+            twofa_enabled:boolean,
+            twofa_enabled_at:string | null,
+        }>('UPDATE users SET twofa_enabled = FALSE, twofa_secret_encrypted = NULL, twofa_secret_iv = NULL, twofa_secret_auth_tag = NULL, twofa_enabled_at = NULL, twofa_backup_codes_version = 0 WHERE id = $1 AND is_active = TRUE RETURNING twofa_enabled, twofa_enabled_at, twofa_backup_codes_version', [targetId]);
+
+        const count2:number = usersUpdate.rowCount ?? 0;
+
+        if (count2 === 0) {
+            await client.query('ROLLBACK');
+
+            return res.status(404).json({
+                ok: false,
+                error:"使用者不存在或資料異常"
+            })
+        }
+
+        // 撤銷所有 backup codes
+        const backupCodeResult = await client.query('UPDATE user_backup_codes SET revoked_at = now() WHERE user_id = $1 AND version =$2 AND revoked_at IS NULL', [targetId, oldVersion]);
+
+        // 撤銷所有 refresh token
+        const refreshTokenResult = await client.query('UPDATE refresh_token SET revoked_at = now() WHERE user_id =$1 AND revoked_at IS NULL', [targetId]);
+
+        // 撤銷所有 session
+        const sessionResult = await client.query('UPDATE session SET revoked_at = now(), reason = $1 WHERE user_id = $2 AND revoked_at IS NULL', ["reset_user_2fa", targetId]);
+
+        const oldTwofaEnabled:boolean = usersResult.rows[0].twofa_enabled;
+        const oldTwofaEnabledAt:string | null = usersResult.rows[0].twofa_enabled_at;
+
+        const newTwofaEnabled:boolean = usersUpdate.rows[0].twofa_enabled;
+        const newTwofaEnabledAt:string | null = usersUpdate.rows[0].twofa_enabled_at
+        const newVersion:number = usersUpdate.rows[0].twofa_backup_codes_version
+
+        const input = {
+            actorUserId:userId,
+            actorRole:userRole,
+            action:"reset_user_2fa",
+            targetType:AuditTargetType.User,
+            targetId: targetId,
+            targetDisplay:"",
+            requestPath:req.originalUrl,
+            requestMethod:AuditRequestMethod.PATCH,
+            requestIp:req.ip,
+            userAgent:req.get("user-agent") ?? null,
+            status: AuditStatus.Success,
+            errorMessage: null,
+            diff: {
+                before: {
+                    twofa_enabled: oldTwofaEnabled,
+                    twofa_enabled_at: oldTwofaEnabledAt,
+                    twofa_backup_codes_version: oldVersion
+                },
+                after: {
+                    twofa_enabled: newTwofaEnabled,
+                    twofa_enabled_at: newTwofaEnabledAt,
+                    twofa_backup_codes_version: newVersion
+                },
+                affected: {
+                    user_backup_codes_revoked: backupCodeResult.rowCount,
+                    refresh_tokens_revoked: refreshTokenResult.rowCount,
+                    sessions_revoked: sessionResult.rowCount
+                }
+            }
+        }
+
+        await writeAdminAuditLogToDb(input, client);
+
+        // [Transaction] 交易成功
+        await client.query("COMMIT");
+
+        return  res.status(200).json({
+            ok: true,
+            message:`${targetId} 使用者的2fa驗證已停用`,
+        })
+    } catch (err) {
+        if (client) {
+            // 多包一層try catch是為了讓finally可以被執行
+            // 如果沒有包的話，會停留在catch上
+            // 這樣就不能釋放pool的連線資源
+            try {
+                await client.query('ROLLBACK');
+            } catch {}
+        }
+
+        const msg = err instanceof Error ? err.message : String(err);
+
+        console.error("[api:admin/resetUser2FA] error:", msg, err);
+
+        res.status(500).json({
+            ok: false,
+            error: "系統錯誤"
+        })
+
+        const input = {
+            actorUserId:userId,
+            actorRole:userRole,
+            action:"reset_user_2fa",
+            targetType:AuditTargetType.User,
+            targetId: targetId,
+            targetDisplay:"",
+            requestPath:req.originalUrl,
+            requestMethod:AuditRequestMethod.PATCH,
+            requestIp:req.ip,
+            userAgent:req.get("user-agent") ?? null,
+            status: AuditStatus.Failed,
+            errorMessage: msg,
+            diff: {}
+        }
+
+        // 讀取使用者列表，不是重要操作，audit log 的寫入可以放在最後
+        await writeAdminAuditLogToDb(input);
+
+        return ;
+    } finally {
+        if (client) client.release();
+    }
+}
+
+export const deactivateUser = async(req: express.Request, res: express.Response) => {
+    const userIdParams = userIdSchema.safeParse(req.user?.id);
+
+    if (!userIdParams.success) {
+        const msg:string = userIdParams.error.issues[0]?.message ?? "未登入";
+        return res.status(401).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userId:number = userIdParams.data;
+
+    const userRoleParams = userRoleSchema.safeParse(req.user?.role);
+
+    if(!userRoleParams.success) {
+        const msg:string = userRoleParams.error.issues[0]?.message ?? "權限不足";
+        return res.status(403).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userRole:"admin" | "assistant" = userRoleParams.data;
+
+    const targetIdParams = userIdSchema.safeParse(req.params.id);
+
+    if (!targetIdParams.success) {
+        const msg:string = targetIdParams.error.issues[0]?.message ?? "非法id";
+        return res.status(400).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const targetId:number = targetIdParams.data;
+
+    // 自我保護
+    if (targetId === userId) {
+        return res.status(403).json({
+            ok: false,
+            error: "admin 不能停用自己",
+        });
+    }
+
+    let client: PoolClient | undefined;
+
+    try {
+        client = await pool.connect();
+        // [Transaction] 開啟交易
+        await client.query('BEGIN');
+
+        // 更新 users table
+        // 清除 users 底下的 2fa 欄位資料
+
+        const userQuery = await client.query<{
+            is_active:boolean,
+            deleted_at:string | null,
+            twofa_enabled:boolean,
+            twofa_enabled_at:string | null,
+            twofa_backup_codes_version:number,
+        }>('SELECT is_active, deleted_at, twofa_enabled, twofa_enabled_at, twofa_backup_codes_version FROM users  WHERE id = $1 AND is_active = TRUE FOR UPDATE', [targetId]);
+
+        const count:number = userQuery.rowCount ?? 0;
+
+        if (count === 0) {
+            await client.query('ROLLBACK');
+
+            return res.status(404).json({
+                ok: false,
+                error:"使用者不存在或資料異常"
+            })
+        }
+
+        const userUpdate = await client.query<{
+            is_active:boolean,
+            deleted_at:string | null,
+            twofa_enabled:boolean,
+            twofa_enabled_at:string | null,
+            twofa_backup_codes_version:number,
+        }>('UPDATE users SET deleted_at = now(), is_active = FALSE, twofa_enabled = FALSE, twofa_secret_encrypted = NULL, twofa_secret_iv = NULL, twofa_secret_auth_tag = NULL, twofa_enabled_at = NULL, twofa_backup_codes_version = 0 WHERE id = $1 AND is_active = TRUE RETURNING is_active, deleted_at, twofa_enabled, twofa_enabled_at, twofa_backup_codes_version', [targetId]);
+
+        const count2:number = userUpdate.rowCount ?? 0;
+
+        if (count2 === 0) {
+            await client.query('ROLLBACK');
+
+            return res.status(404).json({
+                ok: false,
+                error:"使用者不存在或資料異常"
+            })
+        }
+
+        // 撤銷所有 backup codes
+        // 不鎖定特定的 version ，在 user_id 底下的 backup code 全部強制撤銷
+        const backupCodesResult = await client.query('UPDATE user_backup_codes SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [targetId]);
+
+        // 撤銷所有 refresh token
+        const refreshTokenResult = await client.query('UPDATE refresh_token SET revoked_at = now() WHERE user_id =$1 AND revoked_at IS NULL', [targetId]);
+
+        // 撤銷所有 session
+        const sessionResult = await client.query('UPDATE session SET revoked_at = now(), reason = $1 WHERE user_id = $2 AND revoked_at IS NULL', ["soft_delete", targetId]);
+
+        const {is_active:oldIsActive, deleted_at:oldDeletedAt, twofa_backup_codes_version:oldBackupCodesVersion, twofa_enabled_at:oldTwofaEnabledAt, twofa_enabled:oldTwofaEnabled} = userQuery.rows[0];
+
+        const {is_active:newIsActive, deleted_at:newDeletedAt, twofa_backup_codes_version:newBackupCodesVersion, twofa_enabled_at:newTwofaEnabledAt, twofa_enabled:newTwofaEnabled} = userUpdate.rows[0];
+
+        const input = {
+            actorUserId:userId,
+            actorRole:userRole,
+            action:"soft_delete_user",
+            targetType:AuditTargetType.User,
+            targetId: targetId,
+            targetDisplay:"",
+            requestPath:req.originalUrl,
+            requestMethod:AuditRequestMethod.PATCH,
+            requestIp:req.ip,
+            userAgent:req.get("user-agent") ?? null,
+            status: AuditStatus.Success,
+            errorMessage: null,
+            diff: {
+                before: {
+                    is_active: oldIsActive,
+                    deleted_at: oldDeletedAt,
+                    twofa_enabled: oldTwofaEnabled,
+                    twofa_enabled_at: oldTwofaEnabledAt,
+                    twofa_backup_codes_version: oldBackupCodesVersion
+                },
+                after: {
+                    is_active: newIsActive,
+                    deleted_at: newDeletedAt,
+                    twofa_enabled: newTwofaEnabled,
+                    twofa_enabled_at: newTwofaEnabledAt,
+                    twofa_backup_codes_version: newBackupCodesVersion
+                },
+                affected: {
+                    user_backup_codes_revoked: backupCodesResult.rowCount,
+                    refresh_tokens_revoked: refreshTokenResult.rowCount,
+                    sessions_revoked: sessionResult.rowCount
+                },
+                meta: {
+                    reason: "soft_delete"
+                }
+            }
+        }
+
+        await writeAdminAuditLogToDb(input, client);
+
+        // [Transaction] 交易成功
+        await client.query("COMMIT");
+
+        return  res.status(200).json({
+            ok: true,
+            message:`${targetId} 使用者帳號已刪除`,
+        })
+    } catch (err) {
+        if (client) {
+            // 多包一層try catch是為了讓finally可以被執行
+            // 如果沒有包的話，會停留在catch上
+            // 這樣就不能釋放pool的連線資源
+            try {
+                await client.query('ROLLBACK');
+            } catch {}
+        }
+
+        const msg = err instanceof Error ? err.message : String(err);
+
+        console.error("[api:admin/deactivateUser] error:", msg, err);
+
+        res.status(500).json({
+            ok: false,
+            error: "系統錯誤"
+        })
+
+        const input = {
+            actorUserId:userId,
+            actorRole:userRole,
+            action:"soft_delete_user",
+            targetType:AuditTargetType.User,
+            targetId: targetId,
+            targetDisplay:"",
+            requestPath:req.originalUrl,
+            requestMethod:AuditRequestMethod.PATCH,
+            requestIp:req.ip,
+            userAgent:req.get("user-agent") ?? null,
+            status: AuditStatus.Failed,
+            errorMessage: msg,
+            diff: {}
+        }
+
+        // 讀取使用者列表，不是重要操作，audit log 的寫入可以放在最後
+        await writeAdminAuditLogToDb(input);
+
+        return;
+    } finally {
+        if (client) client.release();
+    }
+}
+
+export const restoreUser = async (req: express.Request, res: express.Response) => {
+    const userIdParams = userIdSchema.safeParse(req.user?.id);
+
+    if (!userIdParams.success) {
+        const msg:string = userIdParams.error.issues[0]?.message ?? "未登入";
+        return res.status(401).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userId:number = userIdParams.data;
+
+    const userRoleParams = userRoleSchema.safeParse(req.user?.role);
+
+    if(!userRoleParams.success) {
+        const msg:string = userRoleParams.error.issues[0]?.message ?? "權限不足";
+        return res.status(403).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userRole:"admin" | "assistant" = userRoleParams.data;
+
+    const targetIdParams = userIdSchema.safeParse(req.params.id);
+
+    if (!targetIdParams.success) {
+        const msg:string = targetIdParams.error.issues[0]?.message ?? "非法id";
+        return res.status(400).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const targetId:number = targetIdParams.data;
+
+    let client: PoolClient | undefined;
+
+    let errorStage:string | null = null;
+
+    try {
+        errorStage = "connect_db";
+        client = await pool.connect();
+
+        errorStage = "begin_transaction"
+        // [Transaction] 開啟交易
+        await client.query('BEGIN');
+
+
+        errorStage = "select_before";
+        const userQuery = await client.query<{
+            is_active:boolean,
+            deleted_at:string | null,
+            twofa_enabled:boolean
+        }>('SELECT is_active, deleted_at, twofa_enabled FROM users WHERE id = $1 AND is_active = FALSE FOR UPDATE', [targetId]);
+
+        const count:number = userQuery.rowCount ?? 0;
+
+        if (count === 0) {
+            await client.query('ROLLBACK');
+
+            return res.status(404).json({
+                ok: false,
+                error:"使用者不存在或資料異常"
+            })
+        }
+
+        errorStage = "update_users";
+        const userUpdate = await client.query<{
+            is_active:boolean,
+            deleted_at:string | null,
+            twofa_enabled:boolean
+        }>('UPDATE users SET is_active = TRUE, deleted_at = NULL WHERE id = $1 AND is_active = FALSE RETURNING is_active, deleted_at, twofa_enabled', [targetId]);
+
+        const count2:number = userUpdate.rowCount ?? 0;
+
+        if (count2 === 0) {
+            await client.query('ROLLBACK');
+
+            return res.status(404).json({
+                ok: false,
+                error:"使用者不存在或資料異常"
+            })
+        }
+
+        const {is_active:oldIsActive, deleted_at:oldDeletedAt, twofa_enabled:oldTwofaEnabled} = userQuery.rows[0];
+        const {is_active:newIsActive, deleted_at:newDeletedAt, twofa_enabled:newTwofaEnabled} = userUpdate.rows[0];
+
+        const input = {
+            actorUserId:userId,
+            actorRole:userRole,
+            action:"restore_user",
+            targetType:AuditTargetType.User,
+            targetId: targetId,
+            targetDisplay:"",
+            requestPath:req.originalUrl,
+            requestMethod:AuditRequestMethod.PATCH,
+            requestIp:req.ip,
+            userAgent:req.get("user-agent") ?? null,
+            status: AuditStatus.Success,
+            errorMessage: null,
+            diff: {
+                before: {
+                    is_active: oldIsActive,
+                    deleted_at: oldDeletedAt,
+                    twofa_enabled: oldTwofaEnabled
+                },
+                after: {
+                    is_active: newIsActive,
+                    deleted_at: newDeletedAt,
+                    twofa_enabled: newTwofaEnabled
+                },
+                affected: {
+                    users_updated: count2
+                },
+                meta: {
+                    reason: "restore_user"
+                }
+            }
+        }
+
+        errorStage = "write_audit_success";
+        await writeAdminAuditLogToDb(input, client);
+
+        errorStage = "commit_transaction";
+        // [Transaction] 交易成功
+        await client.query("COMMIT");
+
+        return  res.status(200).json({
+            ok: true,
+            message:`${targetId} 使用者帳號已恢復`,
+        })
+    } catch (err) {
+        if (client) {
+            // 多包一層try catch是為了讓finally可以被執行
+            // 如果沒有包的話，會停留在catch上
+            // 這樣就不能釋放pool的連線資源
+            try {
+                errorStage = "rollback_transaction";
+                await client.query('ROLLBACK');
+            } catch (rollbackErr) {
+                errorStage = "rollback_failed";
+                console.error("[api:admin/restoreUser] rollback failed:", rollbackErr);
+            }
+        }
+
+        const msg = err instanceof Error ? err.message : String(err);
+
+        console.error("[api:admin/restoreUser] error:", msg, err);
+
+        res.status(500).json({
+            ok: false,
+            error: "系統錯誤"
+        })
+
+        const input = {
+            actorUserId:userId,
+            actorRole:userRole,
+            action:"restore_user",
+            targetType:AuditTargetType.User,
+            targetId: targetId,
+            targetDisplay:"",
+            requestPath:req.originalUrl,
+            requestMethod:AuditRequestMethod.PATCH,
+            requestIp:req.ip,
+            userAgent:req.get("user-agent") ?? null,
+            status: AuditStatus.Failed,
+            errorMessage: msg,
+            diff: {
+                meta: {
+                    error_stage: errorStage
+                }
+            }
+        }
+
+        // 讀取使用者列表，不是重要操作，audit log 的寫入可以放在最後
+        await writeAdminAuditLogToDb(input);
+
+        return;
+    } finally {
+        if (client) client.release();
+    }
+}
