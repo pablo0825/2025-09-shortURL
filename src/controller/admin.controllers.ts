@@ -5,11 +5,12 @@ import {pool} from "../pool";
 import {writeAdminAuditLogToDb} from "../utils/writeAdminAuditLogToDb";
 import {usersListSchema, userIdSchema, userRoleSchema} from "../zod/admin.schema";
 import {AuditRequestMethod, AuditStatus, AuditTargetType}  from "../enum/audit";
-import {SessionListItem} from "../type/types";
+import {RoleItem, SessionListItem} from "../type/types";
 import multer from "multer";
 import {handleAccessTokenBlackList} from "../utils/handleAccessTokenBlackList";
 import {writeUserLogToDB} from "../utils/writeUserLogToDB";
 import {UserLogActionEnum} from "../enum/userLogAction.enum";
+import redis from "../redis/redisClient";
 
 export const getUsers = async (req: Request, res: Response) => {
     const userIdParams = userIdSchema.safeParse(req.user?.id);
@@ -1080,4 +1081,141 @@ export const restoreUser = async (req: express.Request, res: express.Response) =
     } finally {
         if (client) client.release();
     }
+}
+
+export const getRoles = async (req: Request, res: Response) => {
+    const userIdParams = userIdSchema.safeParse(req.user?.id);
+
+    if (!userIdParams.success) {
+        const msg:string = userIdParams.error.issues[0]?.message ?? "未登入";
+        return res.status(401).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userId:number = userIdParams.data;
+
+    const userRoleParams = userRoleSchema.safeParse(req.user?.role);
+
+    if(!userRoleParams.success) {
+        const msg:string = userRoleParams.error.issues[0]?.message ?? "權限不足";
+        return res.status(403).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userRole:"admin" | "assistant" = userRoleParams.data;
+
+    // 角色固定，加入快取
+    const key = "admin:roles:list:v1";
+    // 5分鐘過期
+    const ttl = Math.max(1, 300);
+
+    let roles:RoleItem[] | null = null;
+
+    try {
+        const cached = await redis.get(key);
+
+        if (cached) {
+            try {
+                const parsed = cached;
+
+                if (Array.isArray(parsed)) {
+                    roles = parsed;
+                } else {
+                    await redis.del(key);
+                }
+            } catch (err) {
+                await redis.del(key);
+            }
+        }
+
+        if (!roles) {
+            // 查DB
+            // return id, type
+            const roleQuery = await pool.query<{
+                id:number,
+                type:string,
+            }>('SELECT id, type FROM role ORDER BY id DESC ');
+
+            const count:number = roleQuery.rowCount ?? 0;
+
+            if (count === 0) {
+                return res.status(404).json({
+                    ok: false,
+                    error:"角色不存在或資料異常"
+                })
+            }
+
+            roles = roleQuery.rows;
+
+            // 快取寫入
+            // 第三個參數，不能直接放陣列，需要經過序列化後，才能夠放入
+            await redis.setEx(key, ttl, JSON.stringify(roles));
+        }
+
+        res.status(200).json({
+            ok: true,
+            message:`取得 ${roles.length} 個角色`,
+            data: roles,
+        })
+
+        const input = {
+            actorUserId:userId,
+            actorRole:userRole,
+            action:"get_roles",
+            targetType:AuditTargetType.Role,
+            targetId: null,
+            targetDisplay:"",
+            requestPath:req.originalUrl,
+            requestMethod:AuditRequestMethod.GET,
+            requestIp:req.ip,
+            userAgent:req.get("user-agent") ?? null,
+            status: AuditStatus.Success,
+            errorMessage: null,
+            diff: {}
+        }
+
+        // 讀取使用者列表，不是重要操作，audit log 的寫入可以放在最後
+        await writeAdminAuditLogToDb(input);
+
+        return;
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+
+        console.error("[api:admin/getRoles] error:", msg, err);
+
+        res.status(500).json({
+            ok: false,
+            error: "系統錯誤"
+        })
+
+        const input = {
+            actorUserId:userId,
+            actorRole:userRole,
+            action:"get_roles",
+            targetType:AuditTargetType.Role,
+            targetId: null,
+            targetDisplay:"",
+            requestPath:req.originalUrl,
+            requestMethod:AuditRequestMethod.GET,
+            requestIp:req.ip,
+            userAgent:req.get("user-agent") ?? null,
+            status: AuditStatus.Failed,
+            errorMessage: msg,
+            diff: {}
+        }
+
+        // 讀取使用者列表，不是重要操作，audit log 的寫入可以放在最後
+        await writeAdminAuditLogToDb(input);
+
+        return;
+    }
+}
+
+
+export const getRolePermissions = async (req: Request, res: Response) => {
+
 }

@@ -27,3 +27,8 @@ export type SessionListItem = {
     status: "expired" | "inactive" | "active";
     current?: boolean;
 };
+
+export type RoleItem = {
+    id: number;
+    type: string;
+}
