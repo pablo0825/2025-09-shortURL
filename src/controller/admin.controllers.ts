@@ -3,9 +3,9 @@ import express, {Request, Response} from "express";
 import type {PoolClient} from "pg";
 import {pool} from "../pool";
 import {writeAdminAuditLogToDb} from "../utils/writeAdminAuditLogToDb";
-import {usersListSchema, userIdSchema, userRoleSchema} from "../zod/admin.schema";
+import {usersListSchema, userIdSchema, userRoleSchema, roleItemArraySchema, userRoleIdSchema} from "../zod/admin.schema";
 import {AuditRequestMethod, AuditStatus, AuditTargetType}  from "../enum/audit";
-import {RoleItem, SessionListItem} from "../type/types";
+import {PermissionTreeNode, RoleItem, SessionListItem} from "../type/types";
 import multer from "multer";
 import {handleAccessTokenBlackList} from "../utils/handleAccessTokenBlackList";
 import {writeUserLogToDB} from "../utils/writeUserLogToDB";
@@ -1111,7 +1111,7 @@ export const getRoles = async (req: Request, res: Response) => {
     // 角色固定，加入快取
     const key = "admin:roles:list:v1";
     // 5分鐘過期
-    const ttl = Math.max(1, 300);
+    const ttlSeconds = 300;
 
     let roles:RoleItem[] | null = null;
 
@@ -1120,14 +1120,14 @@ export const getRoles = async (req: Request, res: Response) => {
 
         if (cached) {
             try {
-                const parsed = cached;
+                const parsed = roleItemArraySchema.safeParse(JSON.parse(cached));
 
-                if (Array.isArray(parsed)) {
-                    roles = parsed;
+                if (parsed.success) {
+                    roles = parsed.data;
                 } else {
                     await redis.del(key);
                 }
-            } catch (err) {
+            } catch (_err) {
                 await redis.del(key);
             }
         }
@@ -1143,17 +1143,17 @@ export const getRoles = async (req: Request, res: Response) => {
             const count:number = roleQuery.rowCount ?? 0;
 
             if (count === 0) {
-                return res.status(404).json({
-                    ok: false,
-                    error:"角色不存在或資料異常"
+                return res.status(200).json({
+                    ok: true,
+                    data:[]
                 })
             }
 
-            roles = roleQuery.rows;
+            roles = roleQuery.rows ?? [];
 
             // 快取寫入
             // 第三個參數，不能直接放陣列，需要經過序列化後，才能夠放入
-            await redis.setEx(key, ttl, JSON.stringify(roles));
+            await redis.setEx(key, ttlSeconds, JSON.stringify(roles));
         }
 
         res.status(200).json({
@@ -1179,7 +1179,9 @@ export const getRoles = async (req: Request, res: Response) => {
         }
 
         // 讀取使用者列表，不是重要操作，audit log 的寫入可以放在最後
-        await writeAdminAuditLogToDb(input);
+        void writeAdminAuditLogToDb(input).catch((err) => {
+            console.error("[audit] write failed:", err);
+        });
 
         return;
     } catch (err) {
@@ -1187,10 +1189,12 @@ export const getRoles = async (req: Request, res: Response) => {
 
         console.error("[api:admin/getRoles] error:", msg, err);
 
-        res.status(500).json({
-            ok: false,
-            error: "系統錯誤"
-        })
+        if (!res.headersSent) {
+            res.status(500).json({
+                ok: false,
+                error: "系統錯誤"
+            })
+        }
 
         const input = {
             actorUserId:userId,
@@ -1209,7 +1213,9 @@ export const getRoles = async (req: Request, res: Response) => {
         }
 
         // 讀取使用者列表，不是重要操作，audit log 的寫入可以放在最後
-        await writeAdminAuditLogToDb(input);
+        void writeAdminAuditLogToDb(input).catch((err) => {
+            console.error("[audit] write failed:", err);
+        });
 
         return;
     }
@@ -1217,5 +1223,337 @@ export const getRoles = async (req: Request, res: Response) => {
 
 
 export const getRolePermissions = async (req: Request, res: Response) => {
+    const userIdParams = userIdSchema.safeParse(req.user?.id);
 
+    if (!userIdParams.success) {
+        const msg:string = userIdParams.error.issues[0]?.message ?? "未登入";
+        return res.status(401).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userId:number = userIdParams.data;
+
+    const userRoleParams = userRoleSchema.safeParse(req.user?.role);
+
+    if(!userRoleParams.success) {
+        const msg:string = userRoleParams.error.issues[0]?.message ?? "權限不足";
+        return res.status(403).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userRole:"admin" | "assistant" = userRoleParams.data;
+
+    // 這邊的思考點是，assistant 的邊界在哪裡？
+    // 因為我的預想是只有 admin 可以操作這個 api ，但是如果不做下面防護的話，有機率會讓 assistant 也可以操作這個api
+    // 我有想過，可以讓 assistant 操作權限，但這樣感覺沒必要
+    if (userRole !== "admin") {
+        return res.status(403).json({
+            ok: false,
+            error: "權限不足"
+        });
+    }
+
+    const userRoleIdParams = userRoleIdSchema.safeParse(req.params.roleId);
+
+    if (!userRoleIdParams.success) {
+        const msg:string = userRoleIdParams.error.issues[0]?.message ?? "roleId 格式錯誤";
+        return res.status(400).json({
+            ok: false,
+            error: msg,
+        });
+    }
+    
+    const userRoleId:number = userRoleIdParams.data;
+    
+    try {
+        const roleExists = await pool.query('SELECT 1 FROM role WHERE id = $1 LIMIT 1', [userRoleId]);
+
+        const count = roleExists.rowCount ?? 0;
+
+        if (count === 0) {
+            const input = {
+                actorUserId: userId,
+                actorRole: userRole,
+                action: "get_role_permissions",
+                targetType: AuditTargetType.Role,
+                targetId: userRoleId,
+                targetDisplay:null,
+                requestPath: req.originalUrl,
+                requestMethod: AuditRequestMethod.GET,
+                requestIp: req.ip,
+                userAgent: req.get("user-agent") ?? null,
+                status: AuditStatus.Failed, // 或你定義的 NotFound
+                errorMessage: "角色不存在",
+                diff: null
+            };
+
+            void writeAdminAuditLogToDb(input).catch((err) => {
+                console.error("[audit] write failed:", err);
+            });
+
+            return res.status(404).json({
+                ok: false,
+                error: "角色不存在"
+            })
+        }
+
+        const permissionsQuery = await pool.query<{
+            id: number;
+            name: string;
+            module: string;
+            type: string;
+            description: string | null;
+            parent_id: number | null;
+        }>('SELECT p.id, p.name, p.module, p.type, p.description, p.parent_id FROM role_permissions rp JOIN permissions p ON p.id = rp.permissions_id WHERE rp.role_id = $1 ORDER BY p.module ASC , p.type ASC ,p.id ASC', [userRoleId]);
+
+        const input = {
+            actorUserId:userId,
+            actorRole:userRole,
+            action:"get_role_permissions",
+            targetType:AuditTargetType.Role,
+            targetId: userRoleId,
+            targetDisplay:null,
+            requestPath:req.originalUrl,
+            requestMethod:AuditRequestMethod.GET,
+            requestIp:req.ip,
+            userAgent:req.get("user-agent") ?? null,
+            status: AuditStatus.Success,
+            errorMessage: null,
+            diff: null
+        }
+
+        // 讀取使用者列表，不是重要操作，audit log 的寫入可以放在最後
+        void writeAdminAuditLogToDb(input).catch((err) => {
+            console.error("[audit] write failed:", err);
+        });
+
+        return res.status(200).json({
+            ok: true,
+            message:`取得 ${permissionsQuery.rowCount ?? 0} 個權限`,
+            data: permissionsQuery.rows ?? [],
+        });
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+
+        console.error("[api:admin/getRolePermissions] error:", msg, err);
+
+        const input = {
+            actorUserId:userId,
+            actorRole:userRole,
+            action:"get_role_permissions",
+            targetType:AuditTargetType.Role,
+            targetId: userRoleId,
+            targetDisplay:null,
+            requestPath:req.originalUrl,
+            requestMethod:AuditRequestMethod.GET,
+            requestIp:req.ip,
+            userAgent:req.get("user-agent") ?? null,
+            status: AuditStatus.Failed,
+            errorMessage: msg,
+            diff: null
+        }
+
+        // 讀取使用者列表，不是重要操作，audit log 的寫入可以放在最後
+        void writeAdminAuditLogToDb(input).catch((err) => {
+            console.error("[audit] write failed:", err);
+        });
+
+        return res.status(500).json({
+            ok: false,
+            error: "系統錯誤"
+        });
+    }
+}
+
+export const getRolePermissionsTree = async (req:Request, res:Response) => {
+    const userIdParams = userIdSchema.safeParse(req.user?.id);
+
+    if (!userIdParams.success) {
+        const msg:string = userIdParams.error.issues[0]?.message ?? "未登入";
+        return res.status(401).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userId:number = userIdParams.data;
+
+    const userRoleParams = userRoleSchema.safeParse(req.user?.role);
+
+    if(!userRoleParams.success) {
+        const msg:string = userRoleParams.error.issues[0]?.message ?? "權限不足";
+        return res.status(403).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userRole:"admin" | "assistant" = userRoleParams.data;
+
+    // 這邊的思考點是，assistant 的邊界在哪裡？
+    // 因為我的預想是只有 admin 可以操作這個 api ，但是如果不做下面防護的話，有機率會讓 assistant 也可以操作這個api
+    // 我有想過，可以讓 assistant 操作權限，但這樣感覺沒必要
+    if (userRole !== "admin") {
+        return res.status(403).json({
+            ok: false,
+            error: "權限不足"
+        });
+    }
+
+    const userRoleIdParams = userRoleIdSchema.safeParse(req.params.roleId);
+
+    if (!userRoleIdParams.success) {
+        const msg:string = userRoleIdParams.error.issues[0]?.message ?? "roleId 格式錯誤";
+        return res.status(400).json({
+            ok: false,
+            error: msg,
+        });
+    }
+
+    const userRoleId:number = userRoleIdParams.data;
+
+    try {
+        const roleExists = await pool.query('SELECT 1 FROM role WHERE id = $1 LIMIT 1', [userRoleId]);
+
+        const count = roleExists.rowCount ?? 0;
+
+        if (count === 0) {
+            const input = {
+                actorUserId: userId,
+                actorRole: userRole,
+                action: "get_role_permissions_tree",
+                targetType: AuditTargetType.Role,
+                targetId: userRoleId,
+                targetDisplay:null,
+                requestPath: req.originalUrl,
+                requestMethod: AuditRequestMethod.GET,
+                requestIp: req.ip,
+                userAgent: req.get("user-agent") ?? null,
+                status: AuditStatus.Failed, // 或你定義的 NotFound
+                errorMessage: "角色不存在",
+                diff: null
+            };
+
+            void writeAdminAuditLogToDb(input).catch((err) => {
+                console.error("[audit] write failed:", err);
+            });
+
+            return res.status(404).json({
+                ok: false,
+                error: "角色不存在"
+            })
+        }
+
+        // selected_perms 先抓出角色有的全部權限
+        // permission 的 id, parent_id (父)
+        // ancestors 遞迴處理
+        // 第一段，把 selected_perms 的 id, parent_id 放到資料中
+        // union 的功能是，把兩個查詢合併，並去除相同資料
+        // 往上找父節點，直到最上層 a.parent_id = p.id
+        // all_needed 去掉重複 id ，只取出 id 欄位
+        // exists 判斷權限是否有角色有的，true 角色有的; false 父節點
+        const result = await pool.query<{
+            id: number;
+            name: string;
+            module: string;
+            type: string;
+            description: string | null;
+            parent_id: number | null;
+            selected: boolean;
+        }>('WITH RECURSIVE selected_perms AS (SELECT p.id, p.parent_id FROM role_permissions rp JOIN permissions p ON p.id = rp.permissions_id WHERE rp.role_id = $1), ancestors AS (SELECT id, parent_id FROM selected_perms UNION SELECT p.id, p.parent_id FROM permissions p JOIN ancestors a ON a.parent_id = p.id), all_needed AS (SELECT DISTINCT id FROM ancestors) SELECT p.id, p.name, p.module, p.type, p.description, p.parent_id, EXISTS(SELECT 1 FROM role_permissions rp WHERE rp.role_id = $1 AND  rp.permissions_id = p.id) AS selected FROM permissions p JOIN all_needed n ON n.id = p.id ORDER BY p.module ASC, p.type ASC, p.id ASC', [userRoleId]);
+
+        const rows = result.rows ?? [];
+
+        // 建立節點表
+        const nodeMap = new Map<number, PermissionTreeNode>();
+
+        for (const r of rows) {
+            nodeMap.set(r.id, {
+                id: r.id,
+                name: r.name,
+                module: r.module,
+                type: r.type,
+                description: r.description,
+                parentId: r.parent_id,
+                selected: r.selected, // 角色是否有權限
+                inherited: !r.selected, // 是否為父節點
+                children: [] // 空子節點陣列
+            });
+        }
+
+        // 樹
+        const roots: PermissionTreeNode[] = [];
+
+        for (const node of nodeMap.values()) {
+            // 檢查有沒有 parentId ，而且 nodeMap 中真的有 parentId
+            if (node.parentId !== null && nodeMap.has(node.parentId)) {
+                // 把 node 放到父節點的 children 子陣列中
+                // 然後父節點在被放到 roots
+                nodeMap.get(node.parentId)!.children.push(node);
+            } else {
+                // 沒有父節點(本身就是父節點)，就存到 roots 陣列中
+                roots.push(node);
+            }
+        }
+
+        const input = {
+            actorUserId:userId,
+            actorRole:userRole,
+            action:"get_role_permissions_tree",
+            targetType:AuditTargetType.Role,
+            targetId: userRoleId,
+            targetDisplay:null,
+            requestPath:req.originalUrl,
+            requestMethod:AuditRequestMethod.GET,
+            requestIp:req.ip,
+            userAgent:req.get("user-agent") ?? null,
+            status: AuditStatus.Success,
+            errorMessage: null,
+            diff: null
+        }
+
+        // 讀取使用者列表，不是重要操作，audit log 的寫入可以放在最後
+        void writeAdminAuditLogToDb(input).catch((err) => {
+            console.error("[audit] write failed:", err);
+        });
+
+        return res.status(200).json({
+            ok: true,
+            data: roots
+        });
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+
+        console.error("[api:admin/getRolePermissionsTree] error:", msg, err);
+
+        const input = {
+            actorUserId:userId,
+            actorRole:userRole,
+            action:"get_role_permissions_tree",
+            targetType:AuditTargetType.Role,
+            targetId: userRoleId,
+            targetDisplay:null,
+            requestPath:req.originalUrl,
+            requestMethod:AuditRequestMethod.GET,
+            requestIp:req.ip,
+            userAgent:req.get("user-agent") ?? null,
+            status: AuditStatus.Failed,
+            errorMessage: msg,
+            diff: null
+        }
+
+        // 讀取使用者列表，不是重要操作，audit log 的寫入可以放在最後
+        void writeAdminAuditLogToDb(input).catch((err) => {
+            console.error("[audit] write failed:", err);
+        });
+
+        return res.status(500).json({
+            ok: false,
+            error: "系統錯誤"
+        });
+    }
 }

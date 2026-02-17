@@ -4,6 +4,8 @@ import {number, z} from "zod";
 // coerce 字串轉數字
 export const userIdSchema = z.coerce.number().int("userId 必須是整數").positive("userId 必須是正數");
 
+export const userRoleIdSchema = z.coerce.number().int("roleId 必須是整數").positive("roleId 必須是正數");
+
 export const userRoleSchema = z.enum(["admin", "assistant"])
 
 // .preprocess 在正式驗證前，先做一次預處理
@@ -31,3 +33,10 @@ export const usersListSchema = z.object({
     twofa_enabled: queryBooleanSchema.optional(),
     q: z.string().trim().min(1).optional() // 模糊搜尋
 });
+
+const roleItemSchema = z.object({
+    id: z.number().int().positive(),
+    type: z.string().min(1),
+});
+
+export const roleItemArraySchema = z.array(roleItemSchema);

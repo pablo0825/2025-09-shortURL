@@ -32,3 +32,15 @@ export type RoleItem = {
     id: number;
     type: string;
 }
+
+export type PermissionTreeNode = {
+    id: number;
+    name: string;
+    module: string;
+    type: string;
+    description: string | null;
+    parentId: number | null;
+    selected: boolean;   // 角色直接擁有
+    inherited: boolean;  // 補父節點而來
+    children: PermissionTreeNode[];
+};
