@@ -42,8 +42,6 @@ export function generateTotpSecret():string {
     return authenticator.generateSecret();
 }
 
-console.log(generateTotpSecret());
-
 // 建立QR code用的網址
 export function buildOtpAuthUrl(issuer:string, accountName:string, secret:string):string {
     return authenticator.keyuri(accountName, issuer, secret);

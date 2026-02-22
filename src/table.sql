@@ -344,3 +344,6 @@
 --
 -- CREATE INDEX idx_admin_audit_logs_target_time
 --     ON admin_audit_logs (target_type, target_id, created_at);
+
+-- 2026-02-07
+-- ALTER TABLE role ADD COLUMN version integer NOT NULL DEFAULT 0;

@@ -9,5 +9,5 @@
     "skipLibCheck": true, // 跳過對.d.ts定義檔(第三方庫)的檢查
     "outDir": "dist" // 編譯後的檔案要放在哪裡
   },
-  "include": ["src"] // 只編譯src裡面的檔案
+  "include": ["src", "tests"] // 編譯 src 與 tests
 }

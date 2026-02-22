@@ -10,4 +10,7 @@ yarn-error.log*
 .env
 
 .vscode/*
-thoughts.md
+docs/thoughts.md
+dist/
+coverage/
+.DS_Store

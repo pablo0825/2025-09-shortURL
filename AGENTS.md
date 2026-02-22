@@ -1,135 +1,438 @@
-# Repository Guidelines
+# AGENTS.md
 
-## Project Structure & Module Organization
-- `src/` contains the TypeScript server code (Express app, controllers, routes, middleware, Redis, RBAC, and utilities).
-- `uploads/` stores user-uploaded files and is served as static content.
-- `table.sql` documents database schema setup.
-- `document.md` contains additional project notes.
-
-## Build, Test, and Development Commands
-- `npm run dev` — runs the API in development using `nodemon` on `src/index.ts`.
-- `npm run build` — compiles TypeScript to `dist/` using `tsc`.
-- `npm run start` — runs the compiled server from `dist/index.js` (run after `build`).
-
-## Coding Style & Naming Conventions
-- Language: TypeScript + Node.js/Express.
-- Indentation: 4 spaces (match existing `src/*.ts` files).
-- Naming: `camelCase` for variables/functions, `PascalCase` for types/classes, files use lowercase with dots (e.g., `link.controllers.ts`).
-- No formatter or linter is configured; keep changes small and follow existing patterns.
-
-## Testing Guidelines
-- No test runner or test scripts are currently configured.
-- If you add tests, include a script in `package.json` and place tests under a `tests/` or `__tests__/` folder with `*.test.ts` or `*.spec.ts` names.
-
-## Commit & Pull Request Guidelines
-- Recent commits use bracketed status tags in Chinese, e.g., `[完成] auth/resetPassword`, `[未完成] 2fa驗證相關程式碼`.
-- Follow that pattern for consistency: `[完成] <area/feature>` or `[未完成] <area/feature>`.
-- PRs should include: a short summary, affected endpoints/paths, and any needed setup steps (e.g., DB/Redis requirements).
-
-## Configuration & Runtime Notes
-- Environment variables are loaded from `.env`; keep secrets out of commits.
-- The server serves static uploads from `/static` (backed by `uploads/`).
-- The app expects PostgreSQL and Redis to be available before startup (see `src/index.ts`).
-
-
-# Code Review Agent Rules
-
-This document defines the default behavior and workflow for Code Review tasks.
-The goal is to ensure safe, consistent, and high-quality static analysis without
-introducing any side effects to the repository.
+> This document is intended for AI Coding Agents (e.g., Claude Code, Codex, etc.).
+> It describes the project structure, development standards, and operational constraints.
+> Please read it in full before executing any task.
 
 ---
 
-## Default behavior
+## Project Overview
 
-- The agent is allowed to READ files in this repository in read-only mode.
-- The agent MUST NOT modify, create, or delete any file unless the user explicitly says:
-  "approve write".
-- The agent MUST NOT run any command that executes code or changes system state,
-  including but not limited to:
-  npm, pnpm, node, test, build, migration, git, curl, or any external network access.
-- The agent MUST perform static analysis only.
+This project is a **URL shortener backend API service** responsible for creating, querying, and redirecting short URLs. It uses Node.js + Express to handle requests, PostgreSQL to store URL data, and Redis to cache frequently accessed short URLs for improved query performance.
 
----
+### Tech Stack
 
-## Code Review workflow
-
-When the user asks for "code review", "review", or similar requests:
-
-1. Read the relevant files in read-only mode.
-    - Suggested order: controller → service → repo → utils.
-2. Perform a review focusing on:
-    - Readability
-    - Maintainability
-    - Performance
-    - Security (especially auth, 2FA, token, permission-related logic)
-3. If additional context is required, read other related files in read-only mode.
-    - Do not ask the user to paste code unless file access is not available.
-4. Output the review using the fixed Markdown structure defined below.
+| Category | Technology |
+|----------|------------|
+| Runtime | Node.js |
+| Language | TypeScript |
+| Framework | Express |
+| Database | PostgreSQL |
+| Cache | Redis |
+| Validation | Zod |
+| Testing | Vitest |
+| Rate Limiting | express-rate-limit |
+| Security Headers | helmet |
+| Reverse Proxy | Nginx |
+| Containerization | Docker |
 
 ---
 
-## Review output structure (fixed)
+## Environment Setup
 
-All Code Review outputs MUST follow this structure:
+When setting up the project for the first time, run the following command to install dependencies:
 
-- ## TL;DR（最重要 5 點）
-- ## High risk issues（安全或資料風險，需說明影響與建議方向）
-- ## Bugs / Logic issues（可能的 bug 或邏輯問題）
-- ## Design / Architecture（架構與模組切分建議）
-- ## Consistency / Style（命名、錯誤處理、logging、typing）
-- ## Actionable checklist（可直接執行的待辦事項，使用 `- [ ]`）
-
-Each issue SHOULD reference concrete file paths and function or code locations
-(e.g., `src/controller/user.controllers.ts`, `enable2fa()`).
+```bash
+npm install
+```
 
 ---
 
-## Output language and formatting
+## Project Structure
 
-- All Code Review outputs MUST be written in Traditional Chinese (zh-TW).
-- Technical terms MUST remain in English, including but not limited to:
-    - File paths
-    - Function names
-    - Variable names
-    - Class names
-    - Identifiers and symbols
-- Code blocks MUST preserve the original source code and MUST NOT be translated
-  or paraphrased.
-- The tone should be professional, concise, and suitable for long-term documentation.
+```
+.
+├── src/
+│   ├── routes/          # Express route definitions
+│   ├── controllers/     # Request handling, calls the service layer
+│   ├── middlewares/     # Middleware (validation, error handling, etc.)
+│   ├── db/              # Database connection config (pool.ts)
+│   ├── repositories/    # PostgreSQL query encapsulation
+│   ├── services/        # Business logic
+│   ├── schemas/         # Zod schema definitions
+│   ├── types/           # Custom TypeScript types / interfaces
+│   ├── lib/             # Infrastructure wrappers (third-party service wrappers, no business logic, e.g. cache.ts, logger.ts)
+│   ├── utils/           # General utility functions (no business logic)
+│   └── app.ts           # Express application entry point
+├── tests/               # Test files (mirroring src/ structure)
+├── specs/               # Project background docs (for developers only, Agent does not need to read)
+├── database/
+│   └── schema.sql       # Table creation SQL (maintained manually)
+├── .env.example         # Environment variable template (no sensitive data)
+├── docker-compose.yml   # Docker container orchestration config
+├── tsconfig.json
+├── package.json
+├── package-lock.json
+└── AGENTS.md
+```
 
----
+> When adding new files, follow the directory structure above. Do not create new folders arbitrarily in the root directory.
 
-## Saving review results
-
-When the user says one of the following:
-- "save review"
-- "persist this review"
-- "write review"
-
-Then the agent MUST:
-
-1. Use the most recent Code Review content from the current session.
-2. Prepare a Markdown file under the following directory:
-   `docs/codex/code-review/`
-3. Filename format:
-   `CR-<scope>-<YYYY-MM-DD>-<Version>.md`
-
-   Where:
-    - `<Version>` MUST follow the format: `vNN` (e.g., `v01`, `v02`, `v03`).
-    - Version numbering starts from `v01` for the same `<scope>` and date.
-    - The agent MUST NOT automatically infer or increment the version number.
-    - If the version is not explicitly specified by the user,
-      the agent MUST ask the user to provide it before proceeding.
-4. Show the full file path and a brief content summary BEFORE writing.
-5. Write the file ONLY after the user explicitly replies:
-   `"approve write"`.
-6. Do NOT modify, create, or delete any other files.
+> File placement guideline: Put encapsulations with external dependencies or I/O operations (e.g., Redis, logging libraries) in `src/lib/`; put pure computational functions with no external dependencies in `src/utils/`.
 
 ---
 
-## Session handling
+## Layered Architecture
 
-- When the user says "reset session", the agent should start a new session
-  and MUST NOT carry over any previous conversation context.
+Strictly follow the order below. Cross-layer calls are not allowed:
 
+```
+Route → Controller → Service → Repository → Database
+```
+
+| Layer | Responsibility |
+|-------|----------------|
+| **Route** | Defines API paths and middleware. Contains no business logic. |
+| **Controller** | Handles Request / Response, calls Service. Must not access the database directly. |
+| **Service** | Core business logic. Must not depend on any HTTP objects (`req`, `res`). |
+| **Repository** | Contains only database operations. Contains no business logic. |
+| **Database** | PostgreSQL database, connected via `src/db/pool.ts`. |
+
+> **Redis cache** is encapsulated in `src/lib/cache.ts` as an infrastructure wrapper with no business logic. It is called by the Service layer when needed and does not belong to the Repository layer.
+
+---
+
+## Development Standards
+
+### Language & Style
+- Always use **TypeScript**. Adding `.js` files under `src/` is not allowed.
+- Use **ES Modules** (`import` / `export`). Do not use `require`.
+- Use **4-space indentation** and **single quotes** `'` for strings.
+- Each function should have a single responsibility and ideally not exceed 50 lines.
+- Always use **`async/await`**. Avoid `.then()` chains.
+
+```ts
+// ✅ Correct
+const user = await fetchUser(id);
+
+// ❌ Forbidden
+fetchUser(id).then(user => { ... });
+```
+
+- Use **Named Exports**. Avoid default exports.
+
+```ts
+// ✅ Correct
+export const fetchUser = async (id: string): Promise<User> => {
+  // implementation
+}
+
+// ❌ Forbidden: avoid default exports
+export default async function fetchUser(id: string): Promise<User> { ... }
+```
+
+### TypeScript Standards
+- All function parameters and return values must have explicit type annotations. **`any` is forbidden.**
+- Use `interface` for object shapes, and `type` for union types / utility types.
+
+```ts
+// ✅ Correct
+interface UrlRecord {
+  id: number;
+  shortCode: string;
+  originalUrl: string;
+}
+
+type UrlStatus = 'active' | 'expired';
+
+// ❌ Forbidden: use interface for object shapes, use type for union types
+type UrlRecord = { id: number; shortCode: string; }  // should use interface
+type UrlStatus = string                               // should be explicitly defined as a union type
+```
+
+- Enable strict mode (`strict: true`). Do not use forced type casting (`as unknown as X`) to suppress errors.
+
+### Naming Conventions
+- File names: `kebab-case.ts` (e.g., `url-controller.ts`, `url-service.ts`)
+- Variables / Functions: `camelCase` (e.g., `shortCode`, `createShortUrl`)
+- Classes / Interfaces / Types: `PascalCase` (e.g., `UrlRecord`, `CreateUrlDto`)
+- Constants: `UPPER_SNAKE_CASE` (e.g., `MAX_RETRY_COUNT`, `DEFAULT_TTL`)
+
+### Data Validation (Zod)
+- All external input (request body, query params, environment variables) must be validated using **Zod schemas**.
+- Schema definitions go in the `src/schemas/` directory.
+- TypeScript types must be derived from Zod schemas (`z.infer<typeof schema>`). Do not write duplicate type definitions by hand.
+
+### Database (PostgreSQL + pg)
+- Use **`pg` (node-postgres)** as the database driver.
+- The `Pool` instance must be created and exported from `src/db/pool.ts`. Other files must import it from there. Creating a new `Pool` elsewhere is not allowed.
+- All DB operations must be in the `src/repositories/` layer. Controllers must not execute queries directly.
+- **String-concatenated SQL is forbidden.** Always use parameterized queries (`$1, $2, ...` placeholders).
+
+```ts
+// ✅ Correct
+const result = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
+
+// ❌ Forbidden
+const result = await pool.query(`SELECT * FROM users WHERE id = ${userId}`);
+```
+
+- When a transaction is needed, use `pool.connect()` to obtain a client and manage `BEGIN / COMMIT / ROLLBACK` manually. **`client.release()` must be placed in the `finally` block** to ensure the connection is never leaked regardless of success or failure.
+
+```ts
+// ✅ Correct: release in finally, guaranteed to execute
+const client = await pool.connect();
+try {
+  await client.query('BEGIN');
+  await client.query('INSERT INTO urls ...');
+  await client.query('COMMIT');
+} catch (err) {
+  await client.query('ROLLBACK');
+  throw err;
+} finally {
+  client.release();
+}
+```
+
+- Annotate query result types using generics: `pool.query<UserRow>(...)`. Do not use bare `any`.
+
+### Caching (Redis)
+- All Redis operations must be encapsulated in `src/lib/cache.ts`. Calling the Redis client directly elsewhere is not allowed.
+- Cache key naming format: `<module>:<identifier>` (e.g., `url:abc123`).
+- **TTL must always be specified** when setting a cache entry. Permanent caching is not allowed.
+- Follow the **Cache-Aside** pattern: query Redis first → query the database only on a Cache Miss → write the result back to Redis. If the query result is empty (data does not exist), do not write to Redis to avoid caching invalid data.
+- When performing update or delete operations, always follow the principle of **updating/deleting the database first, then deleting/updating the Redis cache**, to ensure eventual data consistency.
+
+### Error Handling
+- **Not every layer needs a `try/catch`.** Each layer's error handling responsibility is as follows:
+    - **Repository layer**: No need to catch. Let the original error propagate up naturally.
+    - **Service layer**: Catch the error, append operation context to the error message (e.g., `[urlService.createShortUrl] original error message`), then re-throw. This makes it easier to trace the error source during debugging.
+    - **Controller layer**: Do not handle errors. Let them propagate up to the error middleware.
+    - **Error middleware**: Receives all errors, logs them, and returns a standardized error response.
+- Silent catches (`catch (e) {}`) are not allowed. Any caught error must be re-thrown and must not be swallowed.
+- **Error logging is the sole responsibility of the error middleware.** Layers must not log errors individually to avoid the same error being recorded multiple times.
+
+### Logging
+- **`console.log` is forbidden in production logic.** Always use the project's unified logger (`src/lib/logger.ts`).
+- The logger must use appropriate log levels: `logger.info`, `logger.warn`, `logger.error`.
+- When an error occurs, always log the full error object. Do not log only the error message string.
+- **Never log sensitive user information** (e.g., passwords, full API keys, tokens) via the logger. Verify that error objects do not contain sensitive fields before logging.
+
+### Environment Variables
+- Sensitive information (API keys, DB passwords, Redis URLs, etc.) must always be injected via environment variables. Hardcoding is not allowed.
+- `.env` must not be committed to version control. Only `.env.example` should be updated when changes are made.
+
+---
+
+## Testing Standards
+
+### General Rules (Vitest)
+- Test files go in the `tests/` directory, mirroring the `src/` structure.
+- Test file naming: `kebab-case.test.ts` (e.g., `url-service.test.ts`).
+- Each test case must clearly describe the scenario being tested. Use `describe` for grouping and `it` for individual cases.
+- Tests must cover both the happy path and error paths.
+- **Unit tests and service-layer tests**: Must not connect to a real database or Redis. Always use mocks.
+- **Integration tests (API routes)**: May connect to a dedicated test database (e.g., testcontainers or a separate test DB). The production database must never be used.
+
+### Coverage Requirements
+- Follow **TDD (Test-Driven Development)**: write tests before implementing features.
+- All new features must have corresponding tests.
+- API routes must have **integration tests**.
+- Utility functions (`src/utils/`) must have **unit tests**.
+- Infrastructure wrappers (`src/lib/`) must have **unit tests**.
+- Minimum test coverage: **70%**. Submissions below this threshold are not allowed.
+
+### Testing Principles
+- Each test must verify **one thing only**. Do not validate multiple behaviors in a single test.
+- Test names must clearly describe the scenario (e.g., "should throw an error when the short code already exists").
+- Tests must be able to **run independently**, with no dependency on the execution order or results of other tests.
+
+### Example
+
+```ts
+describe('url-service', () => {
+  describe('createShortUrl', () => {
+    it('should successfully create a short URL', async () => {
+      // arrange
+      const mockUrl = 'https://example.com';
+      vi.mocked(urlRepository.create).mockResolvedValue({ id: 1, shortCode: 'abc123' });
+
+      // act
+      const result = await urlService.createShortUrl(mockUrl);
+
+      // assert
+      expect(result.shortCode).toBe('abc123');
+    });
+
+    it('should throw an error when the short code already exists', async () => {
+      // arrange
+      vi.mocked(urlRepository.findByCode).mockResolvedValue({ id: 1 });
+
+      // act & assert
+      await expect(urlService.createShortUrl('https://example.com', 'abc123'))
+        .rejects.toThrow('Short code already exists');
+    });
+  });
+});
+```
+
+---
+
+## Security Standards
+
+### Strictly Forbidden
+- Hardcoding API keys, passwords, or tokens in source code.
+- Using `eval()` to execute dynamic code.
+- Concatenating SQL queries directly (SQL Injection risk).
+- Using unvalidated user input directly.
+- Storing URLs with a scheme other than `http://` or `https://` (e.g., `javascript:`, `data:`, `vbscript:` — Open Redirect / XSS risk).
+
+### Required Practices
+- All sensitive information must be read from environment variables (`.env`).
+- Always use parameterized queries (`$1, $2, ...`).
+- All user input must be validated (following the Zod validation rules in the development standards).
+- The `originalUrl` scheme must be restricted to `http://` or `https://` (enforced in the Zod schema).
+- All protected API routes must have authentication/authorization middleware.
+- Public endpoints (e.g., register/login/forgot-password/reset-password) may be unauthenticated by design.
+- All protected API routes must apply **rate limit middleware** (using `express-rate-limit`) to prevent abuse and brute-force attacks.
+- Use **helmet** to manage HTTP security headers, initialized once in `src/app.ts`.
+- CORS configuration must be managed centrally in `src/app.ts`. Setting it on individual routes is not allowed.
+
+---
+
+## Testing & CI Commands
+
+Before submitting code or completing a task, ensure the following commands all pass:
+
+```bash
+# TypeScript type checking
+npm run typecheck
+
+# Lint check
+npm run lint
+
+# Run all tests
+npm test
+
+# Run tests with coverage report
+npm run coverage
+```
+
+> If typecheck, lint, or test fails, fix the issues before submitting. Skipping is not allowed.
+
+> The development server (`npm run dev`) is for local verification only and is not part of the pre-submission checklist.
+
+> Building (`npm run build`) can be run when you need to verify the output. It is not required before every submission.
+
+---
+
+## Agent Behavior Rules
+
+### ✅ Allowed Actions
+- Read and modify files under `src/` and `tests/`.
+- Add new files and directories following the project structure.
+- Run `npm run typecheck`, `npm test`, `npm run lint`, `npm run dev`, `npm run build`, `npm run coverage`.
+- Update `.env.example` (no actual secret values).
+- Modify `.gitignore` to ignore new temporary or generated files, but must not remove existing ignore rules (especially `.env`).
+
+### ❌ Forbidden Actions
+- **Must not modify** `.env` or any config file containing real secrets.
+- **Must not delete** the `tests/` directory or any test files.
+- **Must not execute** destructive database operations (e.g., `DROP TABLE`, truncating data, etc.).
+- **Must not access Redis directly**, bypassing the `src/lib/cache.ts` encapsulation layer.
+- **Must not commit** code containing `console.log` in production logic. Use `src/lib/logger.ts` instead.
+- **Must not install** unconfirmed third-party packages. Propose them first and wait for approval.
+- **Must not push (`git push`)** to any remote branch unless explicitly instructed to do so.
+- **Must not execute SQL to modify the database schema directly.** Instead, provide a complete SQL migration script (e.g., `ALTER TABLE`, `CREATE INDEX`) for the developer to review and execute manually. Scripts must consider backward compatibility — new columns must allow NULL or have a default value to avoid breaking existing data.
+
+### ⚠️ Requires Confirmation Before Acting
+- Before modifying core entry files such as `src/app.ts`, explain the reason for the change.
+- Before refactoring across multiple modules, list the affected scope first.
+- When adding or modifying a Zod schema, verify whether related type derivations need to be updated as well.
+
+---
+
+## Git Commit Standards
+
+Follow Conventional Commits. The commit message format is as follows:
+
+| Prefix | Purpose |
+|--------|---------|
+| `feat:` | New feature |
+| `fix:` | Bug fix |
+| `refactor:` | Refactoring (no functional change) |
+| `test:` | Test-related changes |
+| `docs:` | Documentation updates |
+
+### Examples
+
+```
+feat: add short URL creation API
+fix: fix short URL query returning 404
+refactor: refactor url-service query logic
+test: add unit tests for url-controller
+docs: update AGENTS.md layered architecture section
+```
+
+> Do not use scopes (e.g., `feat(auth):`). Keep the format simple.
+
+---
+
+## Pull Request Standards
+
+PR descriptions must include the following three sections:
+
+1. **Summary**: What this PR does
+2. **Scope of Impact**: Affected endpoints or file paths
+3. **Setup Steps**: Any additional setup required (e.g., DB changes, Redis config, new environment variables)
+
+### Example
+
+```markdown
+## Summary
+Add short URL creation API with support for custom short codes and expiration time.
+
+## Scope of Impact
+- `POST /api/url/create`
+- `src/controllers/url-controller.ts`
+- `src/services/url-service.ts`
+- `src/repositories/url-repository.ts`
+
+## Setup Steps
+- No additional setup required
+```
+
+### GitHub Settings
+- The `main` branch has Branch Protection enabled. **Direct pushes are not allowed.** All changes must be merged via PR.
+- Each feature or fix should be developed on its own branch (e.g., `feat/short-url-create`, `fix/redirect-404`) and submitted as a PR when complete.
+
+---
+
+## Performance Requirements
+
+- When adding queries, verify whether the relevant columns are indexed. If not, suggest adding an index.
+- API response time **must not exceed 500ms at P95**. Cache-hit requests are expected to respond within 50ms; cold queries (direct DB hits) within 200ms. If exceeded, check for missing indexes or N+1 query issues.
+
+---
+
+## When in Doubt
+
+If you are unsure what to do:
+
+1. Stop — do not guess
+2. Ask the user
+3. Refer to existing similar implementations in the project
+
+---
+
+## Docker & Nginx
+
+> ⚠️ This section is not yet active. It is for future reference only. The Agent does not need to interact with these configurations at this time.
+
+### Docker
+- The containerization config file is `docker-compose.yml` in the root directory.
+- Do not modify `docker-compose.yml` on your own. Notify the developer if changes are needed.
+- Do not install packages or modify container settings inside the container directly.
+
+### Nginx
+- Acts as a reverse proxy, forwarding external requests to the Express service.
+- Nginx config file location: to be added.
+- Do not modify Nginx config on your own. Notify the developer if changes are needed.
+
+---
+
+## Additional Notes
+
+- If a task requirement is unclear, **proactively ask** rather than making assumptions and proceeding with changes.
+- After completing each task, briefly describe what was changed and why.
+- If you find potential issues in existing code, flag them, but do not make changes unless explicitly asked to do so.
