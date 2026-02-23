@@ -57,6 +57,7 @@ export const getMyProfile = async (req: Request, res: Response) => {
         });
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+
         if (msg.includes('使用者資料不存在')) {
             return res.status(404).json({
                 ok: false,
