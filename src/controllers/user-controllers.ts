@@ -77,6 +77,7 @@ export const updateMyProfile = async (req: Request, res: Response) => {
 
     if (!userIdParams.success) {
         const msg: string = userIdParams.error.issues[0]?.message ?? '未登入';
+
         return res.status(401).json({
             ok: false,
             error: msg,
@@ -84,8 +85,8 @@ export const updateMyProfile = async (req: Request, res: Response) => {
     }
 
     const userId: number = userIdParams.data;
-    const newMyProfile = myProfileSchema.safeParse(req.body);
 
+    const newMyProfile = myProfileSchema.safeParse(req.body);
     if (!newMyProfile.success) {
         const msg: string = newMyProfile.error.issues[0]?.message ?? '使用者資料格式錯誤';
 
@@ -119,6 +120,7 @@ export const updateMyProfile = async (req: Request, res: Response) => {
         });
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+
         if (msg.includes('使用者資料不存在')) {
             return res.status(404).json({
                 ok: false,
@@ -161,7 +163,12 @@ export const updateMyAvatar = async (req: Request, res: Response) => {
             },
             {
                 fileBuffer: req.file.buffer,
-                fileType: req.avatarFileType,
+                // .avatarFileType 是  FileTypeResult | undefined
+                // .avatarFileType?.mime 是 string | undefined
+                // .ext 和 .mine 的差別是
+                // ext: png, jpg, webp（短字串，像副檔名）
+                // mime: image/png, image/jpeg（完整 MIME 類型）
+                fileType: req.avatarFileType?.mime,
             },
         );
 

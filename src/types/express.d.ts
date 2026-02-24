@@ -1,8 +1,6 @@
-// express.d.ts
-import { Request } from 'express';
+import type { FileTypeResult } from 'file-type';
 
-// 擴展 Express 的 Request 介面
-// 宣告全域變數
+
 declare global {
     namespace Express {
         interface Request {
@@ -12,11 +10,9 @@ declare global {
                 name: string;
                 role: string;
             };
-            //
             avatarFileType?: FileTypeResult;
         }
     }
 }
 
-// 這行很重要，讓 TypeScript 將此檔案視為模組
 export {};

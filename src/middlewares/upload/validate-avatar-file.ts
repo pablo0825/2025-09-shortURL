@@ -1,6 +1,5 @@
 // validateAvatarFile.ts
 import type { Request, Response, NextFunction } from "express";
-import { fileTypeFromBuffer } from "file-type";
 
 const ALLOWED_EXT = new Set(["png", "jpg", "jpeg", "webp"]);
 
@@ -18,6 +17,9 @@ export async function validateAvatarFile(
     }
 
     try {
+        // 改為動態載入，因為這個是 esm 套件，而我現在用的是 commonJs
+        const { fileTypeFromBuffer } = await import('file-type');
+
         // 二進制特徵檢查
         // png開頭一定是 89 50 4E 47等位元組
         // 可以檢查惡意檔案

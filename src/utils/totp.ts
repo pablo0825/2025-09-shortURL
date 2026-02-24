@@ -37,12 +37,12 @@ authenticator.options = {
     window: 1, // 允許前後一個時間窗，降低時間不同步問題
 };
 
-// 生成secret
+// 生成secret，如: JBSWY3DPEHPK3PXP
 export function generateTotpSecret():string {
     return authenticator.generateSecret();
 }
 
-// 建立QR code用的網址
+// 建立QR code用的網址，如: otpauth://totp/ShortURL:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=ShortURL
 export function buildOtpAuthUrl(issuer:string, accountName:string, secret:string):string {
     return authenticator.keyuri(accountName, issuer, secret);
 }

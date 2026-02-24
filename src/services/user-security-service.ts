@@ -3,7 +3,6 @@ import { pool } from '../db/pool';
 import path from 'path';
 import fs from 'fs/promises';
 import sharp from 'sharp';
-import { v4 as uuid4 } from 'uuid';
 import crypto from 'crypto';
 import { safeJoin, ensureDir } from '../utils/fs-utils';
 import { UserLogActionEnum } from '../enum/user-log-action-enum';
@@ -62,6 +61,7 @@ const TWOFA_PENDING_TTL_SEC = 600;
 
 const wrapServiceError = (context: string, error: unknown): Error => {
     const msg = error instanceof Error ? error.message : String(error);
+    // 上下文 + msg ，方便辨識是那個錯誤出問題
     const wrapped = new Error(`[${context}] ${msg}`);
 
     if (error instanceof Error) {
@@ -73,9 +73,12 @@ const wrapServiceError = (context: string, error: unknown): Error => {
 
 const removeFileIfExists = async (filePath: string): Promise<void> => {
     try {
+        // 刪除檔案
         await fs.unlink(filePath);
     } catch (error) {
+        // 把 error 視為 node 的檔案型別錯誤
         const err = error as NodeJS.ErrnoException;
+        // error 不是檔案/路徑不存在，就把 error 丟出
         if (err.code !== 'ENOENT') {
             throw err;
         }
@@ -86,13 +89,18 @@ const removeOldAvatarIfAllowed = async (
     userId: number,
     oldAvatarKey: string | null,
 ): Promise<void> => {
+    // 檢查 oldAvatarKey = null
+    // 檢查 oldAvatarKey 是否包含指定路徑
     if (!oldAvatarKey || !oldAvatarKey.startsWith(`/static/avatars/${userId}/`)) {
         return;
     }
 
+    // 把 /static 替換成 /uploads，因為對外路徑是用 /static
     const oldRelPath = oldAvatarKey.replace('/static', 'uploads');
+    // 在原本的路徑上，補上根目錄
     const oldAbsPath = path.join(process.cwd(), oldRelPath);
     const allowedBase = path.join(process.cwd(), 'uploads', 'avatars', `${userId}/`);
+    // 轉換為絕對路徑，同時檢查是否有犯法行為
     const resolvedOld = path.resolve(oldAbsPath);
     const resolvedBase = path.resolve(allowedBase) + path.sep;
 
@@ -110,13 +118,17 @@ export const updateMyAvatarService = async (
     const userDir = safeJoin(uploadRoot, userIdStr);
     await ensureDir(userDir);
 
-    const filename = `${uuid4()}.webp`;
+    const filename = `${crypto.randomUUID()}.webp`;
     const absFilePath = safeJoin(userDir, filename);
     const avatarUrl = `/static/avatars/${userIdStr}/${filename}`;
+
     let client: PoolClient | undefined;
 
     try {
+        // sharp 是圖片處理工具
+        // 用 sharp 讀取 memory 的圖片資料 (buffer)
         const webBuffer = await sharp(input.fileBuffer, {
+            // 限制最高為2千萬像素
             limitInputPixels: 20_000_000,
         })
             .rotate()
@@ -124,10 +136,19 @@ export const updateMyAvatarService = async (
             .webp({ quality: 85 })
             .toBuffer();
 
+        // .rotate() 自動旋正
+        // 裁切/縮放成 512*512, fit: cover (保持比例填滿，超出會裁切)
+        // 轉成 webp 檔
+        // 回傳處理後的二進制內容，真正執行前面的內容，把處理後的圖片變成新的 buffer
+
+        // 寫入檔案到指定路徑
         await fs.writeFile(absFilePath, webBuffer);
 
         client = await pool.connect();
         await client.query('BEGIN');
+
+        // 策略就是，先拿 old avatar key，然後 update new avatar key 到 db
+        // 最後刪除 old avatar key 的路徑的檔案
 
         const avatarLookup = await findActiveUserAvatarForUpdate(client, context.userId);
         if (!avatarLookup.exists) {
@@ -139,6 +160,7 @@ export const updateMyAvatarService = async (
         const updated = await updateUserAvatarKey(client, context.userId, avatarUrl);
         if (!updated) {
             const updateError = new Error('使用者不存在或資料異常');
+            // 指定名稱後，在上層更容易做錯誤分類
             updateError.name = 'UserNotFoundError';
             throw updateError;
         }
@@ -244,10 +266,11 @@ export const setup2faService = async (
     userEmail: string,
 ): Promise<SetupTwofaResult> => {
     try {
-        const secret = generateTotpSecret();
-        const issuer = process.env.APP_NAME || 'MaApp';
-        const otpauthUrl = buildOtpAuthUrl(issuer, userEmail, secret);
+        const secret:string = generateTotpSecret();
+        const issuer:string = process.env.APP_NAME || 'MaApp';
+        const otpauthUrl:string = buildOtpAuthUrl(issuer, userEmail, secret);
         let qrCode: string;
+
         try {
             qrCode = await toDataUrl(otpauthUrl);
         } catch (error) {
@@ -256,7 +279,8 @@ export const setup2faService = async (
             throw qrError;
         }
 
-        const randomCode = crypto.randomBytes(16).toString('hex');
+        // 16 bytes 轉成16進位字串，每 1 byte 轉成 2 個 hex 字元
+        const randomCode:string = crypto.randomBytes(16).toString('hex');
         const { encrypted, iv, authTag } = encrypt(secret);
 
         const redisKey = buildCacheKey('2fa_pending', `${context.userId}:${randomCode}`);

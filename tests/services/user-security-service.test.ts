@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import crypto from 'crypto';
 
 const {
     queryMock,
@@ -88,10 +89,6 @@ vi.mock('sharp', () => ({
     })),
 }));
 
-vi.mock('uuid', () => ({
-    v4: vi.fn(() => 'avatar-file-id'),
-}));
-
 const fakeClient = {
     query: queryMock,
     release: releaseMock,
@@ -147,6 +144,7 @@ const mockedCacheDel = vi.mocked(cacheDel);
 describe('user-security-service', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.spyOn(crypto, 'randomUUID').mockReturnValue('00000000-0000-4000-8000-000000000000');
         mockedPool.connect.mockResolvedValue(fakeClient as never);
         queryMock.mockResolvedValue({ rowCount: 1 });
         toBufferMock.mockResolvedValue(Buffer.from('webp'));
@@ -190,8 +188,8 @@ describe('user-security-service', () => {
             { fileBuffer: Buffer.from('raw'), fileType: 'image/png' },
         );
 
-        expect(result.filename).toBe('avatar-file-id.webp');
-        expect(result.url).toBe('/static/avatars/7/avatar-file-id.webp');
+        expect(result.filename).toBe('00000000-0000-4000-8000-000000000000.webp');
+        expect(result.url).toBe('/static/avatars/7/00000000-0000-4000-8000-000000000000.webp');
         expect(unlinkMock).toHaveBeenCalledWith(expect.stringContaining('uploads/avatars/7/old.webp'));
     });
 

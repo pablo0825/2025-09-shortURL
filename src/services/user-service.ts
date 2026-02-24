@@ -22,6 +22,7 @@ export const getMyProfileService = async (userId: number) => {
     try {
         const profile = await findProfileByUserId(userId);
 
+        // 檢查 profile === null
         if (!profile) {
             throw new Error('使用者資料不存在 | 404');
         }
