@@ -28,6 +28,7 @@ const twofaPayloadSchema = z.object({
     jti: z.string().min(10),               // unique id for one-time use (recommend UUID)
 });
 
+// 發一個短效的 2fa token
 export function signTwofaToken (userId:number): { token: string; jti: string; expiresInSec: number } {
     const jti = crypto.randomUUID();
 

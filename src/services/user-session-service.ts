@@ -112,12 +112,15 @@ export const logoutDeviceService = async (
     }
 
     let currentSessionLoggedOut = false;
+
     if (refreshToken && result.tokenHashes.length) {
       for (const tokenHash of result.tokenHashes) {
+
         const matched = await bcrypt.compare(refreshToken, tokenHash);
-        if (matched) {
-          currentSessionLoggedOut = true;
-          break;
+
+          if (matched) {
+              currentSessionLoggedOut = true;
+              break;
         }
       }
     }

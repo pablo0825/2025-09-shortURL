@@ -329,6 +329,7 @@ export const enable2faService = async (
 
     try {
         let raw: string | null;
+
         try {
             raw = await cacheGet(redisKey);
         } catch (error) {

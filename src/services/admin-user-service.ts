@@ -111,7 +111,7 @@ interface RestoreUserResult {
 }
 
 const wrapServiceError = (context: string, error: unknown): Error => {
-    const msg = error instanceof Error ? error.message : String(error);
+    const msg:string = error instanceof Error ? error.message : String(error);
     const wrappedError = new Error(`[${context}] ${msg}`);
 
     if (error instanceof Error) {
@@ -125,7 +125,9 @@ export const getUsersService = async (input: GetUsersInput): Promise<GetUsersRes
     let client: PoolClient | undefined;
 
     try {
-        const offset = (input.page - 1) * input.limit;
+        // 決定跳過幾筆資料，如: (1-1=0)*30, (2-1=1)*30
+        const offset:number = (input.page - 1) * input.limit;
+        // 檢查 sortBy 是否在合法白名單內
         const sortBySafe = ['created_at', 'last_login_at', 'email', 'nickname'].includes(input.sortBy)
             ? input.sortBy
             : 'created_at';
@@ -140,7 +142,7 @@ export const getUsersService = async (input: GetUsersInput): Promise<GetUsersRes
         client = await pool.connect();
         await client.query('BEGIN');
 
-        const total = await countUsersByWhereSql(client, queryFilter);
+        const total:number = await countUsersByWhereSql(client, queryFilter);
         const users = await findUsersByWhereSql(
             client,
             queryFilter,

@@ -635,6 +635,7 @@ export const logoutDevice = async (req: Request, res: Response) => {
             });
         }
 
+        // session 是自己的話，就刪除 refresh token and 黑單 access token
         if (result.currentSessionLoggedOut) {
             res.clearCookie('refreshToken');
             await handleAccessTokenBlackList(req.headers?.authorization);

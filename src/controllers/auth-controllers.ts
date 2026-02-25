@@ -18,11 +18,16 @@ import {
 } from '../services/auth-service';
 
 const parseServiceError = (err: unknown, fallbackStatus = 500) => {
-  const message = err instanceof Error ? err.message : String(err);
-  const parts = message.split('|');
-  const maybeStatus = Number(parts[parts.length - 1]);
+  const message:string = err instanceof Error ? err.message : String(err);
+  const parts:string[] = message.split('|');
+  // const parts = ['error', 'forbidden', '403'];
+    // 取出 status code
+  const maybeStatus:number = Number(parts[parts.length - 1]);
 
   if (Number.isFinite(maybeStatus)) {
+      // .slice (0, -1) 取出陣列，除了最後一個值外的所有值
+      // .join 把字串組合起來 error | forbidden 之類的
+      // .replace 移除開頭的 [xxx]
     const cleanedMessage = parts
       .slice(0, -1)
       .join('|')

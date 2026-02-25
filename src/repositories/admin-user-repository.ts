@@ -72,6 +72,11 @@ export const countUsersByWhereSql = async (
     client: PoolClient,
     input: AdminUsersFilterInput,
 ): Promise<number> => {
+    // count 計算比數，::int 把結果轉成整數，total 欄位名稱
+    // $1::boolean，把 $1 轉成 boolean，
+    // 兩種結果，如: true or is_active = true (不過濾)，false or is_active = true (過濾，看右邊結果)
+    // NOT $2 是指邏輯反轉，像是 $2 = true -> NOT $2 = false
+    //
     const sql = `
         SELECT COUNT(*)::int AS total
         FROM users u

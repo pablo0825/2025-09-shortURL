@@ -226,6 +226,7 @@ export const loginService = async (
       throw new ServiceError(401, '帳號或密碼錯誤，請重新輸入');
     }
 
+    // 有啟用 2fa 驗證
     if (user.twofa_enabled) {
       const { token, jti, expiresInSec } = signTwofaToken(user.id);
       await cacheSet(`2fa:login:${jti}`, String(user.id), expiresInSec);
@@ -439,7 +440,7 @@ export const refreshService = async (
   context: AuthContext,
 ): Promise<RefreshSuccess> => {
   try {
-    const userId = decodeRefreshUserId(refreshToken);
+    const userId:number = decodeRefreshUserId(refreshToken);
 
     return await withTransaction(async (client) => {
       const tokens = await findActiveRefreshTokensByUserId(userId, 10, client);
@@ -447,6 +448,7 @@ export const refreshService = async (
         throw new ServiceError(401, 'Refresh Token 已過期或不存在，請重新登入');
       }
 
+      // (typeof tokens)[number] 的意思是，型別是從 tokens 取出的，並取出陣列元素的型別，如 tokens: string[]，型別就是字串陣列
       let matched: (typeof tokens)[number] | null = null;
       for (const token of tokens) {
         const isMatch = await bcrypt.compare(refreshToken, token.refresh_token_hash);
@@ -570,7 +572,12 @@ export const forgotPasswordService = async (
 ): Promise<ForgotPasswordResult> => {
   try {
     const normalizedEmail = email.trim().toLowerCase();
+    // crypto.randomBytes(32) 產生 32 bytes 的 Buffer
+      // .toString('hex') 轉為 16進位的字串，1 byte = 2 個 hex 字元
+      // 所以字串長度是64位元
     const resetToken = crypto.randomBytes(32).toString('hex');
+    // sha256 是 hash ，hash 是不可逆的
+      // digest() 結束 hash 計算，並取出 hex 字串
     const hashToken = crypto.createHash('sha256').update(resetToken).digest('hex');
     const tokenExpiry = new Date(Date.now() + 2 * 60 * 60 * 1000);
     const resetUrl = `${SHORT_BASE_URL}/reset-password?token=${resetToken}`;
@@ -627,10 +634,7 @@ export const resetPasswordService = async (
   context: AuthContext,
 ): Promise<ResetPasswordResult> => {
   try {
-    const hashToken = crypto
-      .createHash('sha256')
-      .update(input.resetToken)
-      .digest('hex');
+    const hashToken = crypto.createHash('sha256').update(input.resetToken).digest('hex');
 
     const { email, nickname } = await withTransaction(async (client) => {
       const user = await findUserForPasswordReset(hashToken, client);
