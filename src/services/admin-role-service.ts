@@ -15,13 +15,14 @@ import {
     insertRolePermissionsByIds,
     updateRoleVersion,
 } from '../repositories/admin-role-repository';
+import {roleArraySchema} from "../schemas/admin-schema";
 
-const roleArraySchema = z.array(
-    z.object({
-        id: z.number().int().positive(),
-        type: z.string().min(1),
-    }),
-);
+// const roleArraySchema = z.array(
+//     z.object({
+//         id: z.number().int().positive(),
+//         type: z.string().min(1),
+//     }),
+// );
 
 const ROLES_CACHE_KEY = buildCacheKey('admin_roles', 'list_v1');
 const ROLES_CACHE_TTL_SECONDS = 300;
@@ -149,8 +150,10 @@ export const getRolePermissionsTreeService = async (
         const roots: PermissionTreeNode[] = [];
         for (const node of nodeMap.values()) {
             if (node.parentId !== null && nodeMap.has(node.parentId)) {
+                // node.parentId 存在，且找得到 parent node，就把 child node push to parent node
                 nodeMap.get(node.parentId)!.children.push(node);
             } else {
+                // 沒有 parent node，就放進去 roots 裡面
                 roots.push(node);
             }
         }
@@ -186,6 +189,9 @@ export const manageRolePermissionsService = async (
             throw versionError;
         }
 
+        // 去重複，利用 map 的特性
+        //  組成資料，如:['user|read', { module: 'user', type: 'read' }],
+        // .values()後， 取出 value，如: { module: 'user', type: 'read' }
         const uniquePairs = Array.from(
             new Map(input.permissions.map((item) => [`${item.module}|${item.type}`, item])).values(),
         );
@@ -197,18 +203,24 @@ export const manageRolePermissionsService = async (
             throw invalidPermissionError;
         }
 
+        // 使用者提交的 permission id 集合 (要變更的)
         const requestedPermissionIds: number[] = permissionRows.map((row) => row.id);
+        // 目前 role 有的 permission id
         const currentPermissionIds: number[] = await findPermissionIdsByRoleId(client, input.roleId);
 
         const currentSet = new Set<number>(currentPermissionIds);
         const requestedSet = new Set<number>(requestedPermissionIds);
 
+        // 要新增的 permission id
         const toAdd: number[] = requestedPermissionIds.filter((id) => !currentSet.has(id));
+        // 要移除的 permission id
         const toRemove: number[] = currentPermissionIds.filter((id) => !requestedSet.has(id));
 
-        const removed = await deleteRolePermissionsByIds(client, input.roleId, toRemove);
-        const added = await insertRolePermissionsByIds(client, input.roleId, toAdd);
+        // 刪除/新增 permission
+        const removed:number = await deleteRolePermissionsByIds(client, input.roleId, toRemove);
+        const added:number = await insertRolePermissionsByIds(client, input.roleId, toAdd);
 
+        // 更新 role 的 version
         const nextVersion = role.version + 1;
         await updateRoleVersion(client, input.roleId, nextVersion);
 

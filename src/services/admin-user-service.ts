@@ -128,10 +128,10 @@ export const getUsersService = async (input: GetUsersInput): Promise<GetUsersRes
         // 決定跳過幾筆資料，如: (1-1=0)*30, (2-1=1)*30
         const offset:number = (input.page - 1) * input.limit;
         // 檢查 sortBy 是否在合法白名單內
-        const sortBySafe = ['created_at', 'last_login_at', 'email', 'nickname'].includes(input.sortBy)
+        const sortBySafe:"created_at" | "last_login_at" | "email" | "nickname" = ['created_at', 'last_login_at', 'email', 'nickname'].includes(input.sortBy)
             ? input.sortBy
             : 'created_at';
-        const sortOrderSafe = input.sortOrder === 'asc' ? 'ASC' : 'DESC';
+        const sortOrderSafe:"ASC" | "DESC" = input.sortOrder === 'asc' ? 'ASC' : 'DESC';
         const queryFilter = {
             includeInactive: input.includeInactive,
             includeTwofaFilter: input.twofa_enabled !== undefined,
@@ -153,14 +153,20 @@ export const getUsersService = async (input: GetUsersInput): Promise<GetUsersRes
         );
 
         const userIds = users.map((item) => item.id);
+
         const roleRows = await findRolesByUserIds(client, userIds);
+
         const roleMap = roleRows.reduce((acc, row) => {
-            const current = acc.get(row.user_id) ?? [];
+            // 取出使用者目前的 role arr ，如: ['user']，不然就是[]
+            const current:string[] = acc.get(row.user_id) ?? [];
+            // 如果有多角色的話，會被推到 current 裡面，也就是 ['user', 'admin']
             current.push(row.type);
+            // <1, "user">
             acc.set(row.user_id, current);
             return acc;
         }, new Map<number, string[]>());
 
+        // 合併 user 和 role 的資料
         const data: GetUsersResultRow[] = users.map((item) => ({
             ...item,
             role: roleMap.get(item.id) ?? [],

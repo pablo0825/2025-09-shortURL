@@ -121,6 +121,8 @@ export const findPermissionRowsByModuleTypePairs = async (
 
     const types: string[] = items.map((item) => item.type);
     const modules: string[] = items.map((item) => item.module);
+    // unnest($1, $2) 變為多列資料，拿去跟 permissions 做比對
+    // i 跟 p 比較
     const sql = `SELECT p.id, p.type, p.module
         FROM unnest($1::text[], $2::text[]) AS i(type, module)
         JOIN permissions p ON p.type = i.type AND p.module = i.module`;

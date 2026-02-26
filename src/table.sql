@@ -347,3 +347,13 @@
 
 -- 2026-02-07
 -- ALTER TABLE role ADD COLUMN version integer NOT NULL DEFAULT 0;
+
+-- 2026-02-26
+    -- 需要考慮裝置不同
+-- UPDATE permissions SET type = 'read_profile', module = 'user' WHERE id = 11;
+
+-- DELETE FROM permissions WHERE id = 12;
+
+-- INSERT INTO role_permissions (role_id, permissions_id) VALUES (2, 11);
+
+INSERT INTO role_permissions (role_id, permissions_id) VALUES (2, 13);

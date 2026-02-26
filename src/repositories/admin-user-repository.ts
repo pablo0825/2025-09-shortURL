@@ -76,7 +76,8 @@ export const countUsersByWhereSql = async (
     // $1::boolean，把 $1 轉成 boolean，
     // 兩種結果，如: true or is_active = true (不過濾)，false or is_active = true (過濾，看右邊結果)
     // NOT $2 是指邏輯反轉，像是 $2 = true -> NOT $2 = false
-    //
+    // 只有 $2 = true 時，$3 才有意義
+    // p - $4 預設是 null ，也就是不篩選，如果不是預設的話，就會去比較看 $4 符合 email 或 name 那一筆資料
     const sql = `
         SELECT COUNT(*)::int AS total
         FROM users u
@@ -107,6 +108,7 @@ export const findUsersByWhereSql = async (
     limit: number,
     offset: number,
 ): Promise<AdminUserListRow[]> => {
+    // last 排在最後
     const sql = `
         SELECT
             u.id,

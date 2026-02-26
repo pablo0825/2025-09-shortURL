@@ -13,7 +13,7 @@ export async function authenticate (req: Request, res: Response, next:NextFuncti
     if (!authHeader?.startsWith("Bearer ")) {
         return res.status(401).json({
             ok: false,
-            error:"headers 中的 authorization 不正確"
+            error:"缺少或格式錯誤的 Authorization Header"
         })
     }
 
@@ -40,6 +40,14 @@ export async function authenticate (req: Request, res: Response, next:NextFuncti
 
         // 驗證jwt
         const decode = jwtAuthTool.verifyToken(accessToken, "access");
+
+        // 先判斷驗證結果，避免把 token 無效誤判成「資料不完整」
+        if (!decode.ok) {
+            return res.status(401).json({
+                ok: false,
+                error: 'Access Token 無效或已過期',
+            });
+        }
         const id = decode.claims?.id;
         const email = decode.claims?.email;
         const name = decode.claims?.name;
@@ -49,7 +57,7 @@ export async function authenticate (req: Request, res: Response, next:NextFuncti
         if(!id || !email || !name || !role){
             return res.status(401).json({
                 ok:false,
-                error:"Access Token 資料不完整"
+                error:"Access Token 資料不完整",
             })
         }
 
@@ -65,7 +73,7 @@ export async function authenticate (req: Request, res: Response, next:NextFuncti
     } catch (err) {
         return res.status(401).json({
             ok: false,
-            error: "Access Token 無效或已過期，請重新登入",
+            error: "Access Token 驗證失敗",
         });
     }
 }

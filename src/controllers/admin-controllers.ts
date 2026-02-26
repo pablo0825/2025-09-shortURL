@@ -77,13 +77,6 @@ export const getUsers = async (req: Request, res: Response) => {
             includeInactive,
         });
 
-        // 200 表示伺服器已完成請求。沒有改變伺服器的狀態
-        res.status(200).json({
-            ok: true,
-            data: result.data,
-            pagination: result.pagination
-        });
-
         const input = {
             actorUserId:userId,
             actorRole:userRole,
@@ -100,8 +93,16 @@ export const getUsers = async (req: Request, res: Response) => {
             diff: {} // diff 檢查前後變化的物件，所以 getUsers 可以不用填
         }
 
-        await writeAdminAuditLogToDb(input);
-        return;
+        void writeAdminAuditLogToDb(input).catch((err) => {
+            logger.warn('[audit] write failed', err);
+        });
+
+        // 200 表示伺服器已完成請求。沒有改變伺服器的狀態
+        return res.status(200).json({
+            ok: true,
+            data: result.data,
+            pagination: result.pagination
+        });
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
 
@@ -121,7 +122,9 @@ export const getUsers = async (req: Request, res: Response) => {
             diff: {}
         }
 
-        await writeAdminAuditLogToDb(input);
+        void writeAdminAuditLogToDb(input).catch((err) => {
+            logger.warn('[audit] write failed', err);
+        });
 
         return res.status(500).json({
             ok: false,
@@ -170,11 +173,6 @@ export const getUser = async(req:Request, res:Response) => {
     try {
         const userResult = await getUserService(targetId);
 
-        res.status(200).json({
-            ok: true,
-            data: userResult,
-        });
-
         const input = {
             actorUserId:userId,
             actorRole:userRole,
@@ -191,8 +189,14 @@ export const getUser = async(req:Request, res:Response) => {
             diff: {} // diff 檢查前後變化的物件，所以 getUsers 可以不用填
         }
 
-        await writeAdminAuditLogToDb(input);
-        return;
+        void writeAdminAuditLogToDb(input).catch((err) => {
+            logger.warn('[audit] write failed', err);
+        });
+
+        return  res.status(200).json({
+            ok: true,
+            data: userResult,
+        });
     } catch (err) {
         if (err instanceof Error && err.name === 'UserNotFoundError') {
             return res.status(404).json({
@@ -219,7 +223,9 @@ export const getUser = async(req:Request, res:Response) => {
             diff: {}
         }
 
-        await writeAdminAuditLogToDb(input);
+        void writeAdminAuditLogToDb(input).catch((err) => {
+            logger.warn('[audit] write failed', err);
+        });
 
         return res.status(500).json({
             ok: false,
@@ -269,12 +275,6 @@ export const getUserSessions = async(req:Request, res:Response) => {
     try {
         const sessionResult = await getUserSessionsService(targetId);
 
-        res.status(200).json({
-            ok: true,
-            message: sessionResult.message,
-            data: sessionResult.data
-        });
-
         const input = {
             actorUserId:userId,
             actorRole:userRole,
@@ -291,9 +291,15 @@ export const getUserSessions = async(req:Request, res:Response) => {
             diff: {} // diff 檢查前後變化的物件，所以 getUsers 可以不用填
         }
 
-        await writeAdminAuditLogToDb(input);
+        void writeAdminAuditLogToDb(input).catch((err) => {
+            logger.warn('[audit] write failed', err);
+        });
 
-        return;
+        return res.status(200).json({
+            ok: true,
+            message: sessionResult.message,
+            data: sessionResult.data
+        });
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
 
@@ -313,7 +319,10 @@ export const getUserSessions = async(req:Request, res:Response) => {
             diff: {}
         }
 
-        await writeAdminAuditLogToDb(input);
+        void writeAdminAuditLogToDb(input).catch((err) => {
+            logger.warn('[audit] write failed', err);
+        });
+
 
         return res.status(500).json({
             ok: false,
@@ -484,7 +493,7 @@ export const deactivateUser = async(req: express.Request, res: express.Response)
             }
         });
 
-        return  res.status(200).json({
+        return res.status(200).json({
             ok: true,
             message:`${targetId} 使用者帳號已刪除`,
         });
@@ -647,12 +656,6 @@ export const getRoles = async (req: Request, res: Response) => {
     try {
         const roles: RoleItem[] = await getRolesService();
 
-        res.status(200).json({
-            ok: true,
-            message:`取得 ${roles.length} 個角色`,
-            data: roles,
-        });
-
         const input = {
             actorUserId:userId,
             actorRole:userRole,
@@ -673,10 +676,13 @@ export const getRoles = async (req: Request, res: Response) => {
             logger.warn('[audit] write failed', err);
         });
 
-        return;
+        return res.status(200).json({
+            ok: true,
+            message:`取得 ${roles.length} 個角色`,
+            data: roles,
+        });
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-
 
         if (!res.headersSent) {
             res.status(500).json({
@@ -816,7 +822,6 @@ export const getRolePermissions = async (req: Request, res: Response) => {
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
 
-
         const input = {
             actorUserId:userId,
             actorRole:userRole,
@@ -948,7 +953,6 @@ export const getRolePermissionsTree = async (req:Request, res:Response) => {
         });
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-
 
         const input = {
             actorUserId:userId,

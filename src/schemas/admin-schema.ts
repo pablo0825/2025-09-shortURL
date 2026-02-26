@@ -59,3 +59,10 @@ export const replaceRolePermissionsSchema = z.object({
     reason: z.string().trim().max(200).optional(),
     version: z.number().int().nonnegative().optional(),
 });
+
+export const roleArraySchema = z.array(
+        z.object({
+            id: z.number().int().positive(),
+            type: z.string().min(1),
+        }),
+);
