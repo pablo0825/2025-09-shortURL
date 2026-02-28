@@ -1,31 +1,31 @@
 // sendEmail.ts
-import nodemailer from "nodemailer";
-import {logger} from "../lib/logger";
+import nodemailer from 'nodemailer';
+import { logger } from '../lib/logger';
 
 const emailUser = process.env.EMAIL_USER;
 const emailPass = process.env.EMAIL_PASSWORD;
 
 // 檢查環境變數是否有設定
 if (!emailUser || !emailPass) {
-    throw new Error("[Email] EMAIL_USER, EMAIL_PASSWORD等環境變數未設定");
+    throw new Error('[Email] EMAIL_USER, EMAIL_PASSWORD等環境變數未設定');
 }
 
 const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
+    host: 'smtp.gmail.com',
     port: 587,
     secure: false,
     auth: {
         user: emailUser,
         pass: emailPass,
-    }
-})
+    },
+});
 
 export async function verifyEmailConnection() {
     try {
         await transporter.verify();
-        logger.info("✅ [Email] SMTP 連線成功");
+        logger.info('✅ [Email] SMTP 連線成功');
     } catch (err) {
-        logger.error("❌ [Email] SMTP 無法連線：", err);
+        logger.error('❌ [Email] SMTP 無法連線：', err);
     }
 }
 
@@ -34,11 +34,11 @@ export async function sendEmail(options: {
     to: string;
     bcc?: string;
     subject: string;
-    html:string;
-    text:string;
+    html: string;
+    text: string;
 }) {
-    if(!emailUser || !emailPass) {
-        throw new Error("[Email] email配置缺失，無法寄信")
+    if (!emailUser || !emailPass) {
+        throw new Error('[Email] email配置缺失，無法寄信');
     }
 
     try {
@@ -51,11 +51,11 @@ export async function sendEmail(options: {
             text: options.text,
         });
 
-        logger.info("[Email] 已寄出：", info.messageId);
+        logger.info('[Email] 已寄出：', info.messageId);
 
         return info;
     } catch (err) {
-        logger.error("[Email] 寄信失敗：", err);
+        logger.error('[Email] 寄信失敗：', err);
 
         if (err instanceof Error) {
             throw new Error(`寄信失敗: ${err.message}`);

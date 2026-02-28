@@ -17,5 +17,9 @@ const { generalApiLimiter, createLinkLimiter } = getRateLimiters();
 router.post('/', checkPermission('link', 'create'), createLinkLimiter, createShortUrl);
 router.get('/', checkPermission('link', 'list'), generalApiLimiter, getAllLinks);
 router.delete('/:id', checkPermission('link', 'delete'), generalApiLimiter, deleteLink);
-router.put('/:id/deactivate', checkPermission('link', 'disable'), generalApiLimiter, deactivateLink);
-
+router.put(
+    '/:id/deactivate',
+    checkPermission('link', 'disable'),
+    generalApiLimiter,
+    deactivateLink,
+);

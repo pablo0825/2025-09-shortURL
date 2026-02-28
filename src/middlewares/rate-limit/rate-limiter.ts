@@ -1,5 +1,5 @@
 // rate-limiter.ts
-import {cacheIsOpen} from "../../lib/cache";
+import { cacheIsOpen } from '../../lib/cache';
 import {
     forgotPasswordLimiter,
     loginLimiter,
@@ -8,8 +8,8 @@ import {
     generalApiLimiter,
     resetPasswordLimiter,
     initAuthRateLimiters,
-} from "./auth-rate-limiter";
-import { createLinkLimiter, initLinkRateLimiters } from "./link-rate-limiter";
+} from './auth-rate-limiter';
+import { createLinkLimiter, initLinkRateLimiters } from './link-rate-limiter';
 import {
     updateAvatarLimiter,
     getMyProfileLimiter,
@@ -24,13 +24,13 @@ import {
     logoutAllLimiter,
     logoutDeviceLimiter,
     initUserRateLimiters,
-} from "./user-rate-limiter";
+} from './user-rate-limiter';
 
 // Redis connect 完成後呼叫
 export function initRedisRateLimiter(): void {
     if (!cacheIsOpen()) {
         // 如果 Redis 未連線就拋錯，避免 fallback MemoryStore
-        throw new Error("Redis is not connected. Call initRedis() before initRateLimiters().");
+        throw new Error('Redis is not connected. Call initRedis() before initRateLimiters().');
     }
 
     initAuthRateLimiters();
@@ -61,7 +61,9 @@ export function getRateLimiters() {
         !logoutAllLimiter ||
         !logoutDeviceLimiter
     ) {
-        throw new Error("Rate limiters not initialized. Did you forget to call initRateLimiters()?");
+        throw new Error(
+            'Rate limiters not initialized. Did you forget to call initRateLimiters()?',
+        );
     }
 
     return {

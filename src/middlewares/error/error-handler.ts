@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { logger } from '../../lib/logger';
+import { isAppError } from '../../utils/app-error';
 
 export const notFoundHandler = (_req: Request, res: Response): void => {
     res.status(404).json({
@@ -9,10 +10,10 @@ export const notFoundHandler = (_req: Request, res: Response): void => {
 };
 
 export const errorHandler = (
-        err: unknown,
-        req: Request,
-        res: Response,
-        next: NextFunction,
+    err: unknown,
+    req: Request,
+    res: Response,
+    next: NextFunction,
 ): void => {
     // 檢查回應是否送出
     if (res.headersSent) {
@@ -28,10 +29,15 @@ export const errorHandler = (
         ip: req.ip,
     });
 
-    // error 真的是 error 物件，就用  err.message
-    const message = err instanceof Error ? err.message : 'Internal Server Error';
+    const rawMessage = err instanceof Error ? err.message : 'Internal Server Error';
+    // replace(搜尋條件, 替換內容)
+    // 所以這邊的意思是，找出符合正規表達式的字串，並替換成空字串
+    // 清理上下文標記，如：[userService.create] something went wrong
+    // 變成：something went wrong
+    const message = rawMessage.replace(/^(\[[^\]]+]\s*)+/, '');
+    const statusCode = isAppError(err) ? err.statusCode : 500;
 
-    res.status(500).json({
+    res.status(statusCode).json({
         ok: false,
         error: message,
     });

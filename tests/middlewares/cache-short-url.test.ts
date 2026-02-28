@@ -7,7 +7,7 @@ const {
     mockCacheExists,
     mockCacheGet,
     mockIsForbiddenTarget,
-    mockWriteLogToDB,
+    mockRecordLinkLogService,
     mockSafeParse,
 } = vi.hoisted(() => {
     return {
@@ -16,7 +16,7 @@ const {
         mockCacheExists: vi.fn(),
         mockCacheGet: vi.fn(),
         mockIsForbiddenTarget: vi.fn(),
-        mockWriteLogToDB: vi.fn(),
+        mockRecordLinkLogService: vi.fn(),
         mockSafeParse: vi.fn(),
     };
 });
@@ -28,12 +28,12 @@ vi.mock('../../src/lib/cache', () => ({
     cacheGet: mockCacheGet,
 }));
 
-vi.mock('../../src/utils/is-forbidden-target', () => ({
+vi.mock('../../src/lib/is-forbidden-target', () => ({
     isForbiddenTarget: mockIsForbiddenTarget,
 }));
 
-vi.mock('../../src/utils/write-log-to-db', () => ({
-    writeLogToDB: mockWriteLogToDB,
+vi.mock('../../src/services/link/link-log-service', () => ({
+    recordLinkLogService: mockRecordLinkLogService,
 }));
 
 vi.mock('../../src/schemas/long-url-schema', () => ({
@@ -65,6 +65,34 @@ describe('cache-short-url middleware', () => {
         vi.clearAllMocks();
     });
 
+    it('should return 400 when code is missing', async () => {
+        const req = {
+            params: { code: '   ' },
+        } as unknown as Request;
+        const res = createResponse();
+        const next = vi.fn() as NextFunction;
+
+        await cacheShortUrl(req, res, next);
+
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(res.send).toHaveBeenCalledWith('short_code是必須的');
+        expect(next).not.toHaveBeenCalled();
+    });
+
+    it('should return 400 when code format is invalid', async () => {
+        const req = {
+            params: { code: 'bad code!' },
+        } as unknown as Request;
+        const res = createResponse();
+        const next = vi.fn() as NextFunction;
+
+        await cacheShortUrl(req, res, next);
+
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(res.send).toHaveBeenCalledWith('short_code格式不正確');
+        expect(next).not.toHaveBeenCalled();
+    });
+
     it('should return 404 when negative cache key exists', async () => {
         const req = {
             params: { code: 'abc123' },
@@ -82,7 +110,7 @@ describe('cache-short-url middleware', () => {
             ok: false,
             error: 'shortURL 不存在(redis)',
         });
-        expect(mockWriteLogToDB).toHaveBeenCalled();
+        expect(mockRecordLinkLogService).toHaveBeenCalled();
         expect(next).not.toHaveBeenCalled();
     });
 
@@ -106,7 +134,7 @@ describe('cache-short-url middleware', () => {
 
         expect(mockCacheGet).toHaveBeenCalledWith('short:abc123');
         expect(res.redirect).toHaveBeenCalledWith(302, longUrl);
-        expect(mockWriteLogToDB).toHaveBeenCalled();
+        expect(mockRecordLinkLogService).toHaveBeenCalled();
         expect(next).not.toHaveBeenCalled();
     });
 
@@ -125,5 +153,64 @@ describe('cache-short-url middleware', () => {
         expect(next).toHaveBeenCalledTimes(1);
         expect(res.redirect).not.toHaveBeenCalled();
         expect(res.status).not.toHaveBeenCalled();
+    });
+
+    it('should delete dirty cache and call next when schema validation fails', async () => {
+        const req = {
+            params: { code: 'abc123' },
+        } as unknown as Request;
+        const res = createResponse();
+        const next = vi.fn() as NextFunction;
+
+        mockCacheExists.mockResolvedValue(false);
+        mockCacheGet.mockResolvedValue('https://example.com/page');
+        mockSafeParse.mockReturnValue({
+            success: false,
+        });
+
+        await cacheShortUrl(req, res, next);
+
+        expect(mockCacheDel).toHaveBeenCalledWith('short:abc123');
+        expect(next).toHaveBeenCalledTimes(1);
+    });
+
+    it('should return 400 when cached target is forbidden', async () => {
+        const req = {
+            params: { code: 'abc123' },
+        } as unknown as Request;
+        const res = createResponse();
+        const next = vi.fn() as NextFunction;
+
+        const longUrl = 'https://example.com/page';
+        mockCacheExists.mockResolvedValue(false);
+        mockCacheGet.mockResolvedValue(longUrl);
+        mockSafeParse.mockReturnValue({
+            success: true,
+            data: longUrl,
+        });
+        mockIsForbiddenTarget.mockResolvedValue(true);
+
+        await cacheShortUrl(req, res, next);
+
+        expect(res.status).toHaveBeenCalledWith(400);
+        expect(res.json).toHaveBeenCalledWith({
+            ok: false,
+            error: '不允許的目標主機(快取)',
+        });
+        expect(next).not.toHaveBeenCalled();
+    });
+
+    it('should call next when cache access throws', async () => {
+        const req = {
+            params: { code: 'abc123' },
+        } as unknown as Request;
+        const res = createResponse();
+        const next = vi.fn() as NextFunction;
+
+        mockCacheExists.mockRejectedValue(new Error('redis down'));
+
+        await cacheShortUrl(req, res, next);
+
+        expect(next).toHaveBeenCalledTimes(1);
     });
 });

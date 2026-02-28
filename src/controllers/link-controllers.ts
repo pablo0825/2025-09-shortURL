@@ -1,188 +1,190 @@
-import type { Request, Response } from 'express';
-import { writeLogToDB } from '../utils/write-log-to-db';
+import type { NextFunction, Request, Response } from 'express';
+import { longUrlSchema } from '../schemas/long-url-schema';
+import { recordLinkLogService } from '../services/link/link-log-service';
+import { linkIdParamSchema, listLinksQuerySchema } from '../schemas/link-schema';
 import {
-  createShortUrlService,
-  deactivateLinkService,
-  deleteLinkService,
-  getAllLinksService,
-  resolveShortCodeService,
-} from '../services/link-service';
+    createShortUrlService,
+    deactivateLinkService,
+    deleteLinkService,
+    getAllLinksService,
+    resolveShortCodeService,
+} from '../services/link/link-service';
 
-const cleanId = (rawId: string): string | null => {
-  const id = rawId.trim();
-  if (!/^\d+$/.test(id)) {
-    return null;
-  }
-  return id;
+const LongUrlSchema = longUrlSchema({
+    shortDomain: process.env.SHORT_BASE_URL,
+    allowHash: true,
+    stripTrackingParams: true,
+    maxLength: 2048,
+});
+
+const buildLinkLogPayload = (req: Request) => {
+    return {
+        ip: req.ip ?? null,
+        ua: req.get?.('user-agent') ?? null,
+        referer: req.get?.('referer') ?? null,
+        path: req.originalUrl ?? '',
+        at: new Date().toISOString(),
+    };
 };
 
-export const createShortUrl = async (req: Request, res: Response) => {
-  try {
-    const result = await createShortUrlService(req.body?.longUrl, req.ip ?? null);
-    writeLogToDB(req, result.id, `新增link ${result.shortUrl}`);
-
-    return res.status(201).json({
-      ok: true,
-      code: result.code,
-      shortUrl: result.shortUrl,
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes('無效的URL') || msg.includes('不允許的目標主機')) {
-      return res.status(400).json({
-        ok: false,
-        error: msg,
-      });
+export const createShortUrl = async (req: Request, res: Response, next: NextFunction) => {
+    const parsed = LongUrlSchema.safeParse(req.body?.longUrl);
+    if (!parsed.success) {
+        const msg = parsed.error.issues[0]?.message ?? '無效的URL';
+        return res.status(400).json({
+            ok: false,
+            error: msg,
+        });
     }
 
-    return res.status(500).json({
-      ok: false,
-      error: msg,
-    });
-  }
+    try {
+        const result = await createShortUrlService(parsed.data, req.ip ?? null);
+        void recordLinkLogService(result.id, buildLinkLogPayload(req), `新增link ${result.shortUrl}`);
+
+        return res.status(201).json({
+            ok: true,
+            code: result.code,
+            shortUrl: result.shortUrl,
+        });
+    } catch (err) {
+        next(err);
+        return;
+    }
 };
 
-export const redirectToLongUrl = async (req: Request, res: Response) => {
-  try {
-    const result = await resolveShortCodeService(req.params.code ?? '');
-    if (result.status === 'not_found' || !result.longUrl) {
-      return res.status(404).json({
-        ok: false,
-        error: 'shortURL 不存在',
-      });
-    }
+export const redirectToLongUrl = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const result = await resolveShortCodeService(req.params.code ?? '');
+        if (result.status === 'not_found' || !result.longUrl) {
+            return res.status(404).json({
+                ok: false,
+                error: 'shortURL 不存在',
+            });
+        }
 
-    if (result.id) {
-      writeLogToDB(req, result.id, 'link被使用');
+        if (result.id) {
+            void recordLinkLogService(result.id, buildLinkLogPayload(req), 'link被使用');
+        }
+        return res.redirect(302, result.longUrl);
+    } catch (err) {
+        next(err);
+        return;
     }
-    return res.redirect(302, result.longUrl);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (
-      msg.includes('short_code是必須的') ||
-      msg.includes('short_code格式不正確') ||
-      msg.includes('不允許的目標主機')
-    ) {
-      return res.status(400).json({
-        ok: false,
-        error: msg,
-      });
-    }
-
-    return res.status(500).json({
-      ok: false,
-      error: msg,
-    });
-  }
 };
 
-export const getAllLinks = async (req: Request, res: Response) => {
-  try {
-    const result = await getAllLinksService({
-      page: Number(req.query.page ?? 1),
-      pageSize: Number(req.query.pageSize ?? 30),
-      includeExpired: req.query.includeExpired === 'true',
-      includeInactive: req.query.includeInactive === 'true',
-    });
+export const getAllLinks = async (req: Request, res: Response, next: NextFunction) => {
+    const parsed = listLinksQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+        const msg = parsed.error.issues[0]?.message ?? '查詢參數格式錯誤';
+        return res.status(400).json({
+            ok: false,
+            error: msg,
+        });
+    }
 
-    return res.status(200).json({
-      ok: true,
-      page: result.page,
-      pageSize: result.pageSize,
-      total: result.total,
-      hasMore: result.hasMore,
-      data: result.data,
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return res.status(500).json({
-      ok: false,
-      error: msg,
-    });
-  }
+    const { page, pageSize, includeExpired, includeInactive } = parsed.data;
+
+    try {
+        const result = await getAllLinksService({
+            page,
+            pageSize,
+            includeExpired,
+            includeInactive,
+        });
+
+        return res.status(200).json({
+            ok: true,
+            page: result.page,
+            pageSize: result.pageSize,
+            total: result.total,
+            hasMore: result.hasMore,
+            data: result.data,
+        });
+    } catch (err) {
+        next(err);
+        return;
+    }
 };
 
-export const deleteLink = async (req: Request, res: Response) => {
-  const id = cleanId(req.params.id ?? '');
-  if (!id) {
-    return res.status(400).json({
-      ok: false,
-      error: 'id 必須是正整數',
-    });
-  }
-
-  try {
-    const deleted = await deleteLinkService(id);
-    if (!deleted) {
-      return res.status(404).json({
-        ok: false,
-        err: `${id} 不存在`,
-      });
+export const deleteLink = async (req: Request, res: Response, next: NextFunction) => {
+    const parsed = linkIdParamSchema.safeParse(req.params.id ?? '');
+    if (!parsed.success) {
+        return res.status(400).json({
+            ok: false,
+            error: 'id 必須是正整數',
+        });
     }
 
-    writeLogToDB(req, id, `已刪除 ${id}`);
-    return res.status(200).json({
-      ok: true,
-      message: `已刪除 ${id}`,
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return res.status(500).json({
-      ok: false,
-      error: msg,
-    });
-  }
+    const id = parsed.data;
+
+    try {
+        const deleted = await deleteLinkService(id);
+        if (!deleted) {
+            return res.status(404).json({
+                ok: false,
+                err: `${id} 不存在`,
+            });
+        }
+
+        void recordLinkLogService(id, buildLinkLogPayload(req), `已刪除 ${id}`);
+        return res.status(200).json({
+            ok: true,
+            message: `已刪除 ${id}`,
+        });
+    } catch (err) {
+        next(err);
+        return;
+    }
 };
 
-export const deactivateLink = async (req: Request, res: Response) => {
-  const id = cleanId(req.params.id ?? '');
-  if (!id) {
-    return res.status(400).json({
-      ok: false,
-      err: 'id 必須是正整數',
-    });
-  }
-
-  try {
-    const result = await deactivateLinkService(id);
-    if (result.status === 'deactivated') {
-      writeLogToDB(req, id, `${id} link停用`);
-      return res.status(200).json({
-        ok: true,
-        msg: `${id} 已停用`,
-      });
+export const deactivateLink = async (req: Request, res: Response, next: NextFunction) => {
+    const parsed = linkIdParamSchema.safeParse(req.params.id ?? '');
+    if (!parsed.success) {
+        return res.status(400).json({
+            ok: false,
+            err: 'id 必須是正整數',
+        });
     }
 
-    if (result.status === 'not_found') {
-      return res.status(404).json({
-        ok: false,
-        err: `${id} 不存在`,
-      });
-    }
+    const id = parsed.data;
 
-    if (result.status === 'already_inactive') {
-      return res.status(409).json({
-        ok: false,
-        err: `id=${id} 已是停用狀態`,
-      });
-    }
+    try {
+        const result = await deactivateLinkService(id);
+        if (result.status === 'deactivated') {
+            void recordLinkLogService(id, buildLinkLogPayload(req), `${id} link停用`);
+            return res.status(200).json({
+                ok: true,
+                msg: `${id} 已停用`,
+            });
+        }
 
-    if (result.status === 'expired') {
-      return res.status(410).json({
-        ok: false,
-        err: `id=${id} 已過期`,
-      });
-    }
+        if (result.status === 'not_found') {
+            return res.status(404).json({
+                ok: false,
+                err: `${id} 不存在`,
+            });
+        }
 
-    return res.status(409).json({
-      ok: false,
-      message: `${id} 無法停用(未知錯誤)`,
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return res.status(500).json({
-      ok: false,
-      error: msg,
-    });
-  }
+        if (result.status === 'already_inactive') {
+            return res.status(409).json({
+                ok: false,
+                err: `id=${id} 已是停用狀態`,
+            });
+        }
+
+        if (result.status === 'expired') {
+            return res.status(410).json({
+                ok: false,
+                err: `id=${id} 已過期`,
+            });
+        }
+
+        return res.status(409).json({
+            ok: false,
+            message: `${id} 無法停用(未知錯誤)`,
+        });
+    } catch (err) {
+        next(err);
+        return;
+    }
 };

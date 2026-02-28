@@ -1,11 +1,10 @@
-
 // linkTasksToCacheTask.task.ts
-import {pool} from "../db/pool";
-import type { PoolClient } from "pg";
-import {logger} from "../lib/logger";
-import {buildCacheKey, cacheDel, cacheSet} from "../lib/cache";
+import { pool } from '../db/pool';
+import type { PoolClient } from 'pg';
+import { logger } from '../lib/logger';
+import { buildCacheKey, cacheDel, cacheSet } from '../lib/cache';
 
-const WORKER_ID = process.env.HOSTNAME ?? "worker-1";
+const WORKER_ID = process.env.HOSTNAME ?? 'worker-1';
 const BATCH_SIZE = 100; // 每次限制100筆
 const VISIBILITY_TIMEOUT_MINUTES = 5; // 逾時時間
 const DEFAULT_SHORT_CACHE_TTL_SECONDS = 30 * 24 * 60 * 60;
@@ -33,7 +32,7 @@ function computeTtlSeconds(expireAt: string | null): number | null {
     // Math.ceil 向上取整數，例如12.3會變成13
     const sec = Math.ceil(ms / 1000);
     // 判斷計算出來的過期時間是否小於0
-    if (sec <= 0) return 0;      // 已過期
+    if (sec <= 0) return 0; // 已過期
     return sec;
 }
 
@@ -43,22 +42,28 @@ export async function linkTasksToCacheTask() {
 
     try {
         // 逾時回收
-        await client.query('UPDATE link_task SET status = $1, available_at = now(), locked_at = NULL, locked_by = NULL WHERE status = $2 AND locked_at < now() - make_interval(mins => $3)', ["pending", "processing", VISIBILITY_TIMEOUT_MINUTES]);
+        await client.query(
+            'UPDATE link_task SET status = $1, available_at = now(), locked_at = NULL, locked_by = NULL WHERE status = $2 AND locked_at < now() - make_interval(mins => $3)',
+            ['pending', 'processing', VISIBILITY_TIMEOUT_MINUTES],
+        );
 
         // 這裡用BEGIN/COMMIT的原因是，希望rowLock(行鎖)只在本次交易中有效。這邊有高併發的考量
         // 本次交易後，lock馬上被釋放，可以被其他works使用
         // 開始連線
-        await client.query("BEGIN");
+        await client.query('BEGIN');
         // select and lock(選取並鎖定)
         // 因為update無法直接鎖定，所以需要先建立臨時表
         // FOR UPDATE 行級鎖定，一但被鎖定後，其他work無法操作資料行，只有等資料行被提交或滾回．原子性
         // SKIP LOCKED 跳過鎖定，如果work發現資料行被鎖定的話，就跳過它，去執行其他資料行．高併發
-        const query = await client.query<LinkTaskRow>('WITH cte AS (SELECT id FROM link_task WHERE status = $1 AND available_at <= now() ORDER BY available_at, id FOR UPDATE SKIP LOCKED LIMIT $2) UPDATE link_task t SET status = $3, locked_at = now(), locked_by = $4, attempts = t.attempts + 1 FROM cte WHERE t.id = cte.id RETURNING t.id, t.payload, t.attempts', ["pending", BATCH_SIZE, "processing", WORKER_ID]);
+        const query = await client.query<LinkTaskRow>(
+            'WITH cte AS (SELECT id FROM link_task WHERE status = $1 AND available_at <= now() ORDER BY available_at, id FOR UPDATE SKIP LOCKED LIMIT $2) UPDATE link_task t SET status = $3, locked_at = now(), locked_by = $4, attempts = t.attempts + 1 FROM cte WHERE t.id = cte.id RETURNING t.id, t.payload, t.attempts',
+            ['pending', BATCH_SIZE, 'processing', WORKER_ID],
+        );
         // 結束連線
-        await client.query("COMMIT");
+        await client.query('COMMIT');
 
         if (query.rows.length === 0) {
-            logger.info("link_task: no pending items.");
+            logger.info('link_task: no pending items.');
             return;
         }
 
@@ -67,13 +72,16 @@ export async function linkTasksToCacheTask() {
         for (const r of rows) {
             const id = r.id;
             const { code, long_url, expire_at = null } = r.payload ?? {};
-            const attempts:number = r.attempts;
+            const attempts: number = r.attempts;
 
             // 基本防呆
             if (!code || !long_url) {
                 // 處理錯誤
                 // 缺少code或long_url，更新status=failed, available_at=間隔時間, ...等等
-                await client.query('UPDATE link_task SET status = $1, last_error = $3, last_error_at = now(), locked_at = NULL, locked_by = NULL WHERE id = $4 AND status = $5', ["failed", "payload缺少code/long_url", id, "processing"]);
+                await client.query(
+                    'UPDATE link_task SET status = $1, last_error = $3, last_error_at = now(), locked_at = NULL, locked_by = NULL WHERE id = $4 AND status = $5',
+                    ['failed', 'payload缺少code/long_url', id, 'processing'],
+                );
                 // 繼續往下執行
                 continue;
             }
@@ -82,12 +90,15 @@ export async function linkTasksToCacheTask() {
             // 超過5次的話，就把status更新為failed
             if (attempts >= 5) {
                 // 把資料的status更新為failed
-                await client.query('UPDATE link_task SET status = $1, processed_at = now(), last_error = $2, last_error_at = now(), locked_at = NULL, locked_by = NULL WHERE id = $3 AND status = $4', ["failed", "attempts exhausted", id, "processing"]);
+                await client.query(
+                    'UPDATE link_task SET status = $1, processed_at = now(), last_error = $2, last_error_at = now(), locked_at = NULL, locked_by = NULL WHERE id = $3 AND status = $4',
+                    ['failed', 'attempts exhausted', id, 'processing'],
+                );
                 // 繼續往下執行
                 continue;
             }
 
-            const key = buildCacheKey("short", code);
+            const key = buildCacheKey('short', code);
             const ttl: number | null = computeTtlSeconds(expire_at);
 
             try {
@@ -96,7 +107,10 @@ export async function linkTasksToCacheTask() {
                     await cacheDel(key);
                     // 把資料的status更新為done
                     // 資料過期不是錯誤，所以用done會比較適合
-                    await client.query('UPDATE link_task SET status = $1, processed_at = now(), locked_at = NULL, locked_by = NULL WHERE id = $2 AND status = $3', ["done", id, "processing"]);
+                    await client.query(
+                        'UPDATE link_task SET status = $1, processed_at = now(), locked_at = NULL, locked_by = NULL WHERE id = $2 AND status = $3',
+                        ['done', id, 'processing'],
+                    );
                 }
                 // [風險] 沒有檢驗url是否合法，如果有人竄改link_task的資料，就無法防禦有問題的url
                 const url = String(long_url);
@@ -107,7 +121,10 @@ export async function linkTasksToCacheTask() {
                     await cacheSet(key, url, ttl);
                 }
                 // redis寫入成功後，把資料的status為done
-                await client.query('UPDATE link_task SET status = $1, processed_at = now(), locked_at = NULL, locked_by = NULL WHERE id = $2 AND status = $3', ["done", id, "processing"]);
+                await client.query(
+                    'UPDATE link_task SET status = $1, processed_at = now(), locked_at = NULL, locked_by = NULL WHERE id = $2 AND status = $3',
+                    ['done', id, 'processing'],
+                );
             } catch (err) {
                 // Redis 寫入失敗
                 //
@@ -118,7 +135,10 @@ export async function linkTasksToCacheTask() {
                 // GREATEST(X ,1) 取最大值
                 // 間隔時間：60 * (2 ^ GREATEST($2 ,1)) = 60 * (2^3)
                 // power(2, 3) 計算次方，2^3=8
-                await client.query('UPDATE link_task SET status = $1, available_at = now() + make_interval(secs => LEAST(3600, 60 * power(2, GREATEST($2 ,1)))), last_error = $3, last_error_at = now(), locked_at = NULL, locked_by = NULL WHERE id = $4 AND status = $5', ["pending", attempts, msg, id, "processing"]);
+                await client.query(
+                    'UPDATE link_task SET status = $1, available_at = now() + make_interval(secs => LEAST(3600, 60 * power(2, GREATEST($2 ,1)))), last_error = $3, last_error_at = now(), locked_at = NULL, locked_by = NULL WHERE id = $4 AND status = $5',
+                    ['pending', attempts, msg, id, 'processing'],
+                );
             }
         }
     } catch (err) {
@@ -129,7 +149,7 @@ export async function linkTasksToCacheTask() {
             try {
                 await client.query('ROLLBACK');
             } catch (rollbackErr) {
-                logger.error("[linkTasksToCacheTask] rollback 失敗", rollbackErr);
+                logger.error('[linkTasksToCacheTask] rollback 失敗', rollbackErr);
                 throw rollbackErr;
             }
         }

@@ -1,10 +1,10 @@
 // delete-user-old-avatar.ts
-import {pool} from "../db/pool";
-import fs from "fs/promises"
-import path from "path";
-import {logger} from "../lib/logger";
+import { pool } from '../db/pool';
+import fs from 'fs/promises';
+import path from 'path';
+import { logger } from '../lib/logger';
 
-export async function deleteUserOldAvatarTask (): Promise<void> {
+export async function deleteUserOldAvatarTask(): Promise<void> {
     // 用try catch包起來
     // 查所有userId, avatar_key，條件是is_action = ture, avatar_key不能為null
     // 檢查回傳值 === 0，ture，跳出程式; false，往下執行
@@ -19,39 +19,38 @@ export async function deleteUserOldAvatarTask (): Promise<void> {
     //
 
     // 改用絕對路徑，避免找不到的問題
-    const uploadsAvatarsRoot:string = path.join(process.cwd(), "uploads", "avatars");
-
-    // 開始時間
-    const startTime = Date.now();
+    const uploadsAvatarsRoot: string = path.join(process.cwd(), 'uploads', 'avatars');
 
     // 掃描使用者數量
     // 刪除文件數量
     // 跳過使用者數量
-    let scannedUsers:number = 0;
-    let removedFiles:number = 0;
-    let skippedUsers:number = 0;
+    let scannedUsers: number = 0;
+    let removedFiles: number = 0;
+    let skippedUsers: number = 0;
 
     let files: string[];
 
     try {
-        const user = await pool.query(`SELECT id, avatar_key FROM users WHERE is_active = TRUE AND avatar_key IS NOT NULL AND avatar_updated_at >= now() - interval '7 days'`);
+        const user = await pool.query(
+            `SELECT id, avatar_key FROM users WHERE is_active = TRUE AND avatar_key IS NOT NULL AND avatar_updated_at >= now() - interval '7 days'`,
+        );
 
         if (user.rowCount === 0) {
-            logger.info("[CRON-04] 沒有使用者頭像，無需清理");
+            logger.info('[CRON-04] 沒有使用者頭像，無需清理');
             return;
         }
 
         logger.info(`[CRON-04] 開始清理 ${user.rowCount} 位使用者的舊頭像`);
 
         // .map無法等await回應，所以要用for迴圈處理
-        for(const u of user.rows) {
+        for (const u of user.rows) {
             // 掃描使用者數量+1
             scannedUsers++;
 
             const avatarKey = u.avatar_key;
 
             // 檢查開頭是否不相同，true，執行程式; false，往下執行
-            if (!avatarKey.startsWith("/static/avatars/")) {
+            if (!avatarKey.startsWith('/static/avatars/')) {
                 // 跳過使用者+1
                 skippedUsers++;
 
@@ -59,16 +58,16 @@ export async function deleteUserOldAvatarTask (): Promise<void> {
                 continue;
             }
 
-            const userDir:string = path.join(uploadsAvatarsRoot, String(u.id));
+            const userDir: string = path.join(uploadsAvatarsRoot, String(u.id));
 
             // 現在的key
-            const filename:string = path.basename(avatarKey);
+            const filename: string = path.basename(avatarKey);
 
             try {
                 // 獲取資料夾中所有檔案名稱
                 // 裝到string []
                 files = await fs.readdir(userDir);
-            } catch (err) {
+            } catch {
                 // 跳過使用者+1
                 skippedUsers++;
 
@@ -76,11 +75,11 @@ export async function deleteUserOldAvatarTask (): Promise<void> {
             }
 
             // 把檔案名稱不符的，都取出來變成一個陣列
-            const otherFile:string[] = files.filter(fn => fn !== filename);
+            const otherFile: string[] = files.filter((fn) => fn !== filename);
 
             for (const file of otherFile) {
                 // 拚出檔案完整路徑
-                const abs:string = path.join(userDir, file);
+                const abs: string = path.join(userDir, file);
 
                 try {
                     // 刪除檔案
@@ -89,13 +88,14 @@ export async function deleteUserOldAvatarTask (): Promise<void> {
                     // 刪除檔案+1
                     removedFiles++;
                 } catch (err) {
-                    logger.warn("[CRON-04] 刪除舊頭像檔失敗", {abs, err});
+                    logger.warn('[CRON-04] 刪除舊頭像檔失敗', { abs, err });
                 }
             }
-
         }
-        logger.info(`[CRON-04] 清理完成：掃描使用者 ${scannedUsers}，跳過 ${skippedUsers}，刪除舊頭像檔 ${removedFiles} 個`);
+        logger.info(
+            `[CRON-04] 清理完成：掃描使用者 ${scannedUsers}，跳過 ${skippedUsers}，刪除舊頭像檔 ${removedFiles} 個`,
+        );
     } catch (err) {
-        logger.error("[CRON-04] 使用者頭像清理失敗", err);
+        logger.error('[CRON-04] 使用者頭像清理失敗', err);
     }
 }

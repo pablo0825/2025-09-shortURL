@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { Server } from 'http';
+import { type Server } from 'http';
 import { buildApp } from './app';
 import { pool } from './db/pool';
 import { initRedis, redisClient } from './lib/redis-client';
@@ -14,7 +14,6 @@ let server: Server;
 
 async function bootstrap(): Promise<void> {
     try {
-
         logger.info('[1/4] 檢查資料庫連線...');
         // select now() 跟資料庫拿目前時間
         await pool.query('SELECT NOW()');
@@ -74,7 +73,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         logger.error('關閉超時（3秒），強制退出');
 
         process.exit(1);
-        }, 3000);
+    }, 3000);
 
     try {
         if (server) {

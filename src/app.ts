@@ -16,30 +16,31 @@ interface AppRouters {
 
 // 把環境變數 CORS_ORIGINS 解析成可用網址的陣列
 const getAllowedOrigins = (): string[] => {
-    const origins:string = process.env.CORS_ORIGINS ?? '';
+    const origins: string = process.env.CORS_ORIGINS ?? '';
 
     // .trim() 去掉前後空白
     // 過濾空字串
     return origins
-            .split(',')
-            .map((origin: string): string => origin.trim())
-            .filter((origin: string): boolean => origin.length > 0);
+        .split(',')
+        .map((origin: string): string => origin.trim())
+        .filter((origin: string): boolean => origin.length > 0);
 };
 
 // 可以改用 cors 套件
 const attachCors = (app: ReturnType<typeof express>): void => {
     // 把 .env 的 CORS_ORIGINS 解析字串陣列
-    const allowOrigins:string[] = getAllowedOrigins();
+    const allowOrigins: string[] = getAllowedOrigins();
 
     app.use((req: Request, res: Response, next): void => {
         // 跨域請求通常會帶 header
-        const origin:string | undefined = req.headers.origin;
+        const origin: string | undefined = req.headers.origin;
 
         // 任一條件成立就放行
         // 沒有 origin
         // 沒有設定白名單
         // origin 在白名單中
-        const isAllowedOrigin:boolean = !origin || allowOrigins.length === 0 || allowOrigins.includes(origin);
+        const isAllowedOrigin: boolean =
+            !origin || allowOrigins.length === 0 || allowOrigins.includes(origin);
 
         if (!isAllowedOrigin) {
             res.status(403).json({
@@ -67,20 +68,21 @@ const attachCors = (app: ReturnType<typeof express>): void => {
         // Content-Type：例如 application/json
         // Accept：告訴伺服器可接受的回應格式
         // Authorization：例如 Bearer token
-        res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization',
-    );
+        res.setHeader(
+            'Access-Control-Allow-Headers',
+            'Origin, X-Requested-With, Content-Type, Accept, Authorization',
+        );
 
-    // 告訴瀏覽器允許哪些方法
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS',);
+        // 告訴瀏覽器允許哪些方法
+        res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
 
-    if (req.method === 'OPTIONS') {
-        res.sendStatus(204);
+        if (req.method === 'OPTIONS') {
+            res.sendStatus(204);
 
-        return;
-    }
+            return;
+        }
 
-    next();
-
+        next();
     });
 };
 

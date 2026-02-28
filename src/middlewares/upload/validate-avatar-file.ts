@@ -1,18 +1,14 @@
 // validateAvatarFile.ts
-import type { Request, Response, NextFunction } from "express";
+import type { Request, Response, NextFunction } from 'express';
 
-const ALLOWED_EXT = new Set(["png", "jpg", "jpeg", "webp"]);
+const ALLOWED_EXT = new Set(['png', 'jpg', 'jpeg', 'webp']);
 
-export async function validateAvatarFile(
-        req: Request,
-        res: Response,
-        next: NextFunction
-) {
+export async function validateAvatarFile(req: Request, res: Response, next: NextFunction) {
     // 檢查使用者是否有上傳檔案
     if (!req.file?.buffer) {
         return res.status(400).json({
             ok: false,
-            error: "請上傳 avatar 檔案",
+            error: '請上傳 avatar 檔案',
         });
     }
 
@@ -28,7 +24,7 @@ export async function validateAvatarFile(
         if (!fileType || !ALLOWED_EXT.has(fileType.ext)) {
             return res.status(400).json({
                 ok: false,
-                error: "圖片格式不正確，只允許 JPG / PNG / WEBP",
+                error: '圖片格式不正確，只允許 JPG / PNG / WEBP',
             });
         }
 

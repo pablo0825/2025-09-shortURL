@@ -1,7 +1,7 @@
-import type { Request, Response } from "express";
-import rateLimit, { ipKeyGenerator } from "express-rate-limit";
-import RedisStore from "rate-limit-redis";
-import {cacheSendCommand} from "../../lib/cache";
+import type { Request, Response } from 'express';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import RedisStore from 'rate-limit-redis';
+import { cacheSendCommand } from '../../lib/cache';
 
 type RedisData = boolean | number | string;
 type RedisReplyLike = RedisData | RedisData[];
@@ -31,8 +31,8 @@ export function createRedisRateLimiter(options: RateLimitOptions) {
 
         // 如果有 email，用 IP+email 當 key；否則只用 IP
         keyGenerator(req: Request): string {
-            const email = req.body?.email || "";
-            const rawIp: string = req.ip ?? req.socket.remoteAddress ?? "unknown";
+            const email = req.body?.email || '';
+            const rawIp: string = req.ip ?? req.socket.remoteAddress ?? 'unknown';
             const ipKey: string = ipKeyGenerator(rawIp);
 
             return email ? `${ipKey}:${email}` : ipKey;

@@ -18,11 +18,7 @@ export const cacheGetDel = async (key: string): Promise<string | null> => {
     return redisClient.getDel(key);
 };
 
-export const cacheSet = async (
-        key: string,
-        value: string,
-        ttlSec: number,
-): Promise<void> => {
+export const cacheSet = async (key: string, value: string, ttlSec: number): Promise<void> => {
     if (!Number.isFinite(ttlSec) || ttlSec <= 0) {
         throw new Error('ttl 必須是大於 0 的數字');
     }
@@ -48,7 +44,7 @@ export const cacheDelMany = async (keys: string[]): Promise<number> => {
 
 export const cacheExists = async (key: string): Promise<boolean> => {
     // 檢查 key 是否存在，1 是存在，0 是不存在
-    const count:number = await redisClient.exists(key);
+    const count: number = await redisClient.exists(key);
 
     return count > 0;
 };
@@ -73,9 +69,9 @@ export const cacheExpire = async (key: string, ttlSec: number): Promise<void> =>
 };
 
 export const cacheSetMembers = async (
-        key: string,
-        members: string[],
-        ttlSec?: number,
+    key: string,
+    members: string[],
+    ttlSec?: number,
 ): Promise<void> => {
     // 先刪除這個 key 在 redis 中的舊資料
     await redisClient.del(key);
@@ -92,8 +88,8 @@ export const cacheSetMembers = async (
 
     // ttl 有設定時，才會執行裡面的程式碼
     if (ttlSec !== undefined) {
-      // TTL 必須是有效數字，且大於0
-      // TTL 不能為 NaN、Infinity、0、負數
+        // TTL 必須是有效數字，且大於0
+        // TTL 不能為 NaN、Infinity、0、負數
         if (!Number.isFinite(ttlSec) || ttlSec <= 0) {
             throw new Error('ttl 必須是大於 0 的數字');
         }
@@ -106,16 +102,13 @@ export const cacheSetMembers = async (
 
 export const cacheIsMember = async (key: string, member: string): Promise<boolean> => {
     // 檢查 redis 的 set 中，有沒有 member 存在，1 表示存在，0 表示不存在
-    const result:number = await redisClient.sIsMember(key, member);
+    const result: number = await redisClient.sIsMember(key, member);
 
     return result > 0;
 };
 
 // 帶過期時間的計數器 +1
-export const cacheIncrWithTtl = async (
-        key: string,
-        ttlSec: number,
-): Promise<number> => {
+export const cacheIncrWithTtl = async (key: string, ttlSec: number): Promise<number> => {
     if (!Number.isFinite(ttlSec) || ttlSec <= 0) {
         throw new Error('ttl 必須是大於 0 的數字');
     }
@@ -143,9 +136,7 @@ export const cacheIncrWithTtl = async (
 
 // args 是 Redis 指令與參數，如：['EXPIRE(指令)', 'key', '60']
 // 函式的回傳型別 = redisClient.sendCommand 的回傳型別
-export const cacheSendCommand = (
-        args: string[],
-): ReturnType<typeof redisClient.sendCommand> => {
+export const cacheSendCommand = (args: string[]): ReturnType<typeof redisClient.sendCommand> => {
     // 把 args 交給 redis client 處理
     // 把 redis 指令交給 redis client 執行，如：SET, GET 等等
     // 再依據指令類型去處理資料

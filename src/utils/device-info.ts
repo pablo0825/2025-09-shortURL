@@ -1,8 +1,8 @@
 // deviceInfo.ts
-import {UAParser} from "ua-parser-js";
+import { UAParser } from 'ua-parser-js';
 
 type DeviceInfo = {
-    deviceType: string;   // mobile/tablet/desktop/console/smarttv/wearable/embedded/unknown
+    deviceType: string; // mobile/tablet/desktop/console/smarttv/wearable/embedded/unknown
     deviceModel: string | null;
     deviceVendor: string | null;
     osName: string | null;
@@ -11,17 +11,16 @@ type DeviceInfo = {
     browserVersion: string | null;
 };
 
-export const parseUserAgentToDeviceInfo = (userAgent: string | null): DeviceInfo =>
-{
+export const parseUserAgentToDeviceInfo = (userAgent: string | null): DeviceInfo => {
     if (!userAgent) {
         return {
-            deviceType: "unknown",
+            deviceType: 'unknown',
             deviceModel: null,
             deviceVendor: null,
             osName: null,
             osVersion: null,
             browserName: null,
-            browserVersion: null
+            browserVersion: null,
         };
     }
 
@@ -31,12 +30,12 @@ export const parseUserAgentToDeviceInfo = (userAgent: string | null): DeviceInfo
     const browser = parser.getBrowser();
 
     return {
-        deviceType: device.type ?? "desktop", // 若無 type 通常可視為 desktop
+        deviceType: device.type ?? 'desktop', // 若無 type 通常可視為 desktop
         deviceModel: device.model ?? null,
         deviceVendor: device.vendor ?? null,
         osName: os.name ?? null,
         osVersion: os.version ?? null,
         browserName: browser.name ?? null,
-        browserVersion: browser.version ?? null
+        browserVersion: browser.version ?? null,
     };
 };

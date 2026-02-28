@@ -21,10 +21,7 @@ interface MutableResponse {
     end: () => MutableResponse;
 }
 
-export const invokeRouter = async (
-    router: Router,
-    input: InvokeRequest,
-): Promise<InvokeResult> => {
+export const invokeRouter = async (router: Router, input: InvokeRequest): Promise<InvokeResult> => {
     return new Promise<InvokeResult>((resolve) => {
         const req = {
             method: input.method,

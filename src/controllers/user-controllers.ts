@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { type NextFunction, type Request, type Response } from 'express';
 import {
     bodySchema,
     codeAndNonceSchema,
@@ -7,13 +7,13 @@ import {
     userIdSchema,
 } from '../schemas/user-schema';
 import { emailSchema } from '../schemas/auth-schema';
-import { changeMyPasswordService } from '../services/user-password-service';
-import { getMyProfileService, updateMyProfileService } from '../services/user-service';
+import { changeMyPasswordService } from '../services/user/user-password-service';
+import { getMyProfileService, updateMyProfileService } from '../services/user/user-service';
 import {
     getMySessionsListService,
     logoutAllService,
     logoutDeviceService,
-} from '../services/user-session-service';
+} from '../services/user/user-session-service';
 import {
     deleteMyAvatarService,
     disable2faService,
@@ -21,10 +21,10 @@ import {
     setup2faService,
     softDeleteMyAccountService,
     updateMyAvatarService,
-} from '../services/user-security-service';
+} from '../services/user/user-security-service';
 import { handleAccessTokenBlackList } from '../utils/handle-access-token-black-list';
 
-export const getMyProfile = async (req: Request, res: Response) => {
+export const getMyProfile = async (req: Request, res: Response, next: NextFunction) => {
     const userIdParams = userIdSchema.safeParse(req.user?.id);
 
     if (!userIdParams.success) {
@@ -56,23 +56,12 @@ export const getMyProfile = async (req: Request, res: Response) => {
             },
         });
     } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-
-        if (msg.includes('使用者資料不存在')) {
-            return res.status(404).json({
-                ok: false,
-                error: '使用者資料不存在',
-            });
-        }
-
-        return res.status(500).json({
-            ok: false,
-            error: '系統錯誤',
-        });
+        next(err);
+        return;
     }
 };
 
-export const updateMyProfile = async (req: Request, res: Response) => {
+export const updateMyProfile = async (req: Request, res: Response, next: NextFunction) => {
     const userIdParams = userIdSchema.safeParse(req.user?.id);
 
     if (!userIdParams.success) {
@@ -119,23 +108,12 @@ export const updateMyProfile = async (req: Request, res: Response) => {
             },
         });
     } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-
-        if (msg.includes('使用者資料不存在')) {
-            return res.status(404).json({
-                ok: false,
-                error: '使用者資料不存在',
-            });
-        }
-
-        return res.status(500).json({
-            ok: false,
-            error: '系統錯誤',
-        });
+        next(err);
+        return;
     }
 };
 
-export const updateMyAvatar = async (req: Request, res: Response) => {
+export const updateMyAvatar = async (req: Request, res: Response, next: NextFunction) => {
     const userIdParams = userIdSchema.safeParse(req.user?.id);
 
     if (!userIdParams.success) {
@@ -181,21 +159,12 @@ export const updateMyAvatar = async (req: Request, res: Response) => {
             },
         });
     } catch (err) {
-        if (err instanceof Error && err.name === 'UserNotFoundError') {
-            return res.status(404).json({
-                ok: false,
-                error: '使用者不存在或資料異常',
-            });
-        }
-
-        return res.status(500).json({
-            ok: false,
-            error: '系統錯誤',
-        });
+        next(err);
+        return;
     }
 };
 
-export const deleteMyAvatar = async (req: Request, res: Response) => {
+export const deleteMyAvatar = async (req: Request, res: Response, next: NextFunction) => {
     const userIdParams = userIdSchema.safeParse(req.user?.id);
 
     if (!userIdParams.success) {
@@ -219,21 +188,12 @@ export const deleteMyAvatar = async (req: Request, res: Response) => {
             message: '使用者頭像刪除成功',
         });
     } catch (err) {
-        if (err instanceof Error && err.name === 'UserNotFoundError') {
-            return res.status(404).json({
-                ok: false,
-                error: '使用者不存在或資料異常',
-            });
-        }
-
-        return res.status(500).json({
-            ok: false,
-            error: '系統錯誤',
-        });
+        next(err);
+        return;
     }
 };
 
-export const changeMyPassword = async (req: Request, res: Response) => {
+export const changeMyPassword = async (req: Request, res: Response, next: NextFunction) => {
     const userIdParams = userIdSchema.safeParse(req.user?.id);
 
     if (!userIdParams.success) {
@@ -272,35 +232,12 @@ export const changeMyPassword = async (req: Request, res: Response) => {
             message: '密碼已成功重設，請使用新密碼重新登入',
         });
     } catch (err) {
-        if (err instanceof Error && err.name === 'UserNotFoundError') {
-            return res.status(404).json({
-                ok: false,
-                error: '使用者不存在或資料異常',
-            });
-        }
-
-        if (err instanceof Error && err.name === 'PasswordMismatchError') {
-            return res.status(400).json({
-                ok: false,
-                error: '舊密碼輸入錯誤，請重新確認',
-            });
-        }
-
-        if (err instanceof Error && err.name === 'PasswordAlreadyUpdatedError') {
-            return res.status(409).json({
-                ok: false,
-                error: '密碼已被更新',
-            });
-        }
-
-        return res.status(500).json({
-            ok: false,
-            error: '系統錯誤',
-        });
+        next(err);
+        return;
     }
 };
 
-export const setup2fa = async (req: Request, res: Response) => {
+export const setup2fa = async (req: Request, res: Response, next: NextFunction) => {
     const userIdParams = userIdSchema.safeParse(req.user?.id);
 
     if (!userIdParams.success) {
@@ -341,28 +278,12 @@ export const setup2fa = async (req: Request, res: Response) => {
             randomCode: result.randomCode,
         });
     } catch (err) {
-        if (err instanceof Error && err.name === 'TwofaQrGenerationError') {
-            return res.status(500).json({
-                ok: false,
-                error: '無法產生驗證 QR Code',
-            });
-        }
-
-        if (err instanceof Error && err.name === 'TwofaCacheWriteError') {
-            return res.status(503).json({
-                ok: false,
-                error: '系統暫時無法設定 2FA，請稍後再試',
-            });
-        }
-
-        return res.status(503).json({
-            ok: false,
-            error: '系統暫時無法設定 2FA，請稍後再試',
-        });
+        next(err);
+        return;
     }
 };
 
-export const enable2fa = async (req: Request, res: Response) => {
+export const enable2fa = async (req: Request, res: Response, next: NextFunction) => {
     const userIdParams = userIdSchema.safeParse(req.user?.id);
 
     if (!userIdParams.success) {
@@ -402,49 +323,12 @@ export const enable2fa = async (req: Request, res: Response) => {
             backupCodes: result.backupCodes,
         });
     } catch (err) {
-        if (err instanceof Error && err.name === 'PendingTwofaExpiredError') {
-            return res.status(400).json({
-                ok: false,
-                error: '2FA 設定已過期，請重新開始',
-            });
-        }
-
-        if (err instanceof Error && err.name === 'InvalidTwofaCodeError') {
-            return res.status(400).json({
-                ok: false,
-                error: '驗證碼錯誤',
-            });
-        }
-
-        if (err instanceof Error && err.name === 'InvalidTwofaPayloadError') {
-            return res.status(400).json({
-                ok: false,
-                error: '資料解析失敗',
-            });
-        }
-
-        if (err instanceof Error && err.name === 'TwofaCacheReadError') {
-            return res.status(503).json({
-                ok: false,
-                error: '系統暫時無法啟用 2FA / Redis 讀取失敗',
-            });
-        }
-
-        if (err instanceof Error && err.name === 'UserNotFoundError') {
-            return res.status(404).json({
-                ok: false,
-                error: '使用者不存在或資料異常',
-            });
-        }
-
-        return res.status(500).json({
-            ok: false,
-            error: '系統錯誤',
-        });
+        next(err);
+        return;
     }
 };
 
-export const disable2fa = async (req: Request, res: Response) => {
+export const disable2fa = async (req: Request, res: Response, next: NextFunction) => {
     const userIdParams = userIdSchema.safeParse(req.user?.id);
 
     if (!userIdParams.success) {
@@ -474,21 +358,12 @@ export const disable2fa = async (req: Request, res: Response) => {
             message: '2fa 已停用',
         });
     } catch (err) {
-        if (err instanceof Error && err.name === 'UserNotFoundError') {
-            return res.status(404).json({
-                ok: false,
-                error: '使用者不存在或資料異常',
-            });
-        }
-
-        return res.status(500).json({
-            ok: false,
-            error: '系統錯誤',
-        });
+        next(err);
+        return;
     }
 };
 
-export const softDeleteMyAccount = async (req: Request, res: Response) => {
+export const softDeleteMyAccount = async (req: Request, res: Response, next: NextFunction) => {
     const userIdParams = userIdSchema.safeParse(req.user?.id);
 
     if (!userIdParams.success) {
@@ -517,21 +392,12 @@ export const softDeleteMyAccount = async (req: Request, res: Response) => {
             message: '使用者帳號已刪除',
         });
     } catch (err) {
-        if (err instanceof Error && err.name === 'UserNotFoundError') {
-            return res.status(404).json({
-                ok: false,
-                error: '使用者不存在或資料異常',
-            });
-        }
-
-        return res.status(500).json({
-            ok: false,
-            error: '系統錯誤',
-        });
+        next(err);
+        return;
     }
 };
 
-export const getMySessionsList = async (req: Request, res: Response) => {
+export const getMySessionsList = async (req: Request, res: Response, next: NextFunction) => {
     const userIdParams = userIdSchema.safeParse(req.user?.id);
 
     if (!userIdParams.success) {
@@ -559,14 +425,12 @@ export const getMySessionsList = async (req: Request, res: Response) => {
             data: sessionResult.data,
         });
     } catch (err) {
-        return res.status(500).json({
-            ok: false,
-            error: '系統錯誤',
-        });
+        next(err);
+        return;
     }
 };
 
-export const logoutAll = async (req: Request, res: Response) => {
+export const logoutAll = async (req: Request, res: Response, next: NextFunction) => {
     const userIdParams = userIdSchema.safeParse(req.user?.id);
 
     if (!userIdParams.success) {
@@ -593,14 +457,12 @@ export const logoutAll = async (req: Request, res: Response) => {
 
         return;
     } catch (err) {
-        return res.status(500).json({
-            ok: false,
-            error: '系統錯誤',
-        });
+        next(err);
+        return;
     }
 };
 
-export const logoutDevice = async (req: Request, res: Response) => {
+export const logoutDevice = async (req: Request, res: Response, next: NextFunction) => {
     const userIdParams = userIdSchema.safeParse(req.user?.id);
 
     if (!userIdParams.success) {
@@ -646,9 +508,7 @@ export const logoutDevice = async (req: Request, res: Response) => {
             message: '裝置已登出',
         });
     } catch (err) {
-        return res.status(500).json({
-            ok: false,
-            error: '系統錯誤',
-        });
+        next(err);
+        return;
     }
 };

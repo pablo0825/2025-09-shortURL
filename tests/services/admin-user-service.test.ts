@@ -6,7 +6,7 @@ vi.mock('../../src/db/pool', () => ({
     },
 }));
 
-vi.mock('../../src/repositories/admin-user-repository', () => ({
+vi.mock('../../src/repositories/admin/user-repository', () => ({
     countUsersByWhereSql: vi.fn(),
     findActiveSessionsByUserId: vi.fn(),
     findRolesByUserIds: vi.fn(),
@@ -41,7 +41,7 @@ import {
     revokeRefreshTokensByUserId,
     revokeSessionsByUserId,
     softDeleteActiveUser,
-} from '../../src/repositories/admin-user-repository';
+} from '../../src/repositories/admin/user-repository';
 import {
     deactivateUserService,
     getUserService,
@@ -49,7 +49,7 @@ import {
     getUserSessionsService,
     resetUser2faService,
     restoreUserService,
-} from '../../src/services/admin-user-service';
+} from '../../src/services/admin/admin-user-service';
 
 const queryMock = vi.fn();
 const releaseMock = vi.fn();
@@ -82,8 +82,22 @@ describe('admin-user-service', () => {
     it('should return user list with pagination and merged roles', async () => {
         mockedCountUsersByWhereSql.mockResolvedValue(2);
         mockedFindUsersByWhereSql.mockResolvedValue([
-            { id: 1, email: 'a@x.com', nickname: 'a', is_active: true, last_login_at: null, twofa_enabled: true },
-            { id: 2, email: 'b@x.com', nickname: 'b', is_active: false, last_login_at: null, twofa_enabled: false },
+            {
+                id: 1,
+                email: 'a@x.com',
+                nickname: 'a',
+                is_active: true,
+                last_login_at: null,
+                twofa_enabled: true,
+            },
+            {
+                id: 2,
+                email: 'b@x.com',
+                nickname: 'b',
+                is_active: false,
+                last_login_at: null,
+                twofa_enabled: false,
+            },
         ]);
         mockedFindRolesByUserIds.mockResolvedValue([
             { user_id: 1, type: 'admin' },
@@ -103,10 +117,37 @@ describe('admin-user-service', () => {
         expect(result.data[1].role).toEqual(['user']);
     });
 
+    it('should rollback and wrap error when getUsers query fails', async () => {
+        mockedCountUsersByWhereSql.mockRejectedValue(new Error('db down'));
+
+        await expect(
+            getUsersService({
+                page: 1,
+                limit: 20,
+                sortBy: 'bad_field' as never,
+                sortOrder: 'weird' as never,
+                includeInactive: false,
+            }),
+        ).rejects.toMatchObject({
+            message: '[adminUserService.getUsers] db down',
+        });
+
+        expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
+        expect(releaseMock).toHaveBeenCalled();
+    });
+
     it('should throw UserNotFoundError when getUser target does not exist', async () => {
         mockedFindUserById.mockResolvedValue(null);
 
         await expect(getUserService(99)).rejects.toMatchObject({ name: 'UserNotFoundError' });
+    });
+
+    it('should return user when getUser target exists', async () => {
+        mockedFindUserById.mockResolvedValue({ id: 9, email: 'u@example.com' } as never);
+
+        const result = await getUserService(9);
+
+        expect(result).toEqual({ id: 9, email: 'u@example.com' });
     });
 
     it('should mark session status correctly', async () => {
@@ -135,6 +176,35 @@ describe('admin-user-service', () => {
         expect(result.data).toHaveLength(2);
         expect(result.data[0].status).toBe('inactive');
         expect(result.data[1].status).toBe('expired');
+    });
+
+    it('should return empty session list message when no sessions exist', async () => {
+        mockedFindActiveSessionsByUserId.mockResolvedValue([]);
+
+        const result = await getUserSessionsService(7);
+
+        expect(result).toEqual({
+            message: '尚無裝置紀錄',
+            data: [],
+        });
+    });
+
+    it('should mark active sessions correctly', async () => {
+        const now = Date.now();
+        mockedFindActiveSessionsByUserId.mockResolvedValue([
+            {
+                id: 3,
+                last_seen_at: new Date(now - 1_000),
+                expires_at: new Date(now + 10_000),
+                user_agent: 'ua3',
+                ip_address: '3.3.3.3',
+                device_info: 'd3',
+            },
+        ]);
+
+        const result = await getUserSessionsService(7);
+
+        expect(result.data[0].status).toBe('active');
     });
 
     it('should throw UserNotFoundError when resetting 2fa for missing user', async () => {
@@ -166,6 +236,19 @@ describe('admin-user-service', () => {
         expect(queryMock).toHaveBeenCalledWith('COMMIT');
     });
 
+    it('should throw UserNotFoundError when resetUser2fa update returns null', async () => {
+        mockedFindActiveUserTwofaStateForUpdate.mockResolvedValue({
+            twofa_backup_codes_version: 5,
+            twofa_enabled: true,
+            twofa_enabled_at: '2026-01-01',
+        });
+        mockedDisableUserTwofaState.mockResolvedValue(null);
+
+        await expect(resetUser2faService(7)).rejects.toMatchObject({ name: 'UserNotFoundError' });
+
+        expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
+    });
+
     it('should deactivate user successfully', async () => {
         mockedFindActiveUserForDeactivateForUpdate.mockResolvedValue({
             is_active: true,
@@ -192,6 +275,29 @@ describe('admin-user-service', () => {
         expect(result.affected.sessions_revoked).toBe(2);
     });
 
+    it('should throw UserNotFoundError when deactivating missing user', async () => {
+        mockedFindActiveUserForDeactivateForUpdate.mockResolvedValue(null);
+
+        await expect(deactivateUserService(8)).rejects.toMatchObject({ name: 'UserNotFoundError' });
+
+        expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
+    });
+
+    it('should throw UserNotFoundError when deactivate update returns null', async () => {
+        mockedFindActiveUserForDeactivateForUpdate.mockResolvedValue({
+            is_active: true,
+            deleted_at: null,
+            twofa_enabled: true,
+            twofa_enabled_at: '2026-01-01',
+            twofa_backup_codes_version: 1,
+        });
+        mockedSoftDeleteActiveUser.mockResolvedValue(null);
+
+        await expect(deactivateUserService(8)).rejects.toMatchObject({ name: 'UserNotFoundError' });
+
+        expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
+    });
+
     it('should restore inactive user successfully', async () => {
         mockedFindInactiveUserForRestoreForUpdate.mockResolvedValue({
             is_active: false,
@@ -209,5 +315,26 @@ describe('admin-user-service', () => {
         expect(result.before.is_active).toBe(false);
         expect(result.after.is_active).toBe(true);
         expect(result.affected.users_updated).toBe(1);
+    });
+
+    it('should throw UserNotFoundError when restoring missing user', async () => {
+        mockedFindInactiveUserForRestoreForUpdate.mockResolvedValue(null);
+
+        await expect(restoreUserService(8)).rejects.toMatchObject({ name: 'UserNotFoundError' });
+
+        expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
+    });
+
+    it('should throw UserNotFoundError when restore update returns null', async () => {
+        mockedFindInactiveUserForRestoreForUpdate.mockResolvedValue({
+            is_active: false,
+            deleted_at: '2026-01-20',
+            twofa_enabled: false,
+        });
+        mockedRestoreInactiveUser.mockResolvedValue(null);
+
+        await expect(restoreUserService(8)).rejects.toMatchObject({ name: 'UserNotFoundError' });
+
+        expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
     });
 });

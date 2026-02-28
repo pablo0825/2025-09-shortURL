@@ -1,5 +1,5 @@
-import rateLimit from "express-rate-limit";
-import { createRedisRateLimiter } from "./rate-limiter-base";
+import type rateLimit from 'express-rate-limit';
+import { createRedisRateLimiter } from './rate-limiter-base';
 
 export let createLinkLimiter: ReturnType<typeof rateLimit> | null = null;
 
@@ -8,7 +8,7 @@ export function initLinkRateLimiters(): void {
     createLinkLimiter = createRedisRateLimiter({
         windowMs: 24 * 60 * 60 * 1000,
         max: 100,
-        prefix: "rl:create-link:",
-        message: "今日建立短網址已達上限 100 次，請明天再試",
+        prefix: 'rl:create-link:',
+        message: '今日建立短網址已達上限 100 次，請明天再試',
     });
 }

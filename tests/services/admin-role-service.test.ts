@@ -13,7 +13,7 @@ vi.mock('../../src/lib/cache', () => ({
     cacheSet: vi.fn(),
 }));
 
-vi.mock('../../src/repositories/admin-role-repository', () => ({
+vi.mock('../../src/repositories/admin/role-repository', () => ({
     checkRoleExistsById: vi.fn(),
     findAllRoles: vi.fn(),
     findPermissionTreeRowsByRoleId: vi.fn(),
@@ -27,7 +27,7 @@ vi.mock('../../src/repositories/admin-role-repository', () => ({
 }));
 
 import { pool } from '../../src/db/pool';
-import { cacheGet, cacheSet } from '../../src/lib/cache';
+import { cacheDel, cacheGet, cacheSet } from '../../src/lib/cache';
 import {
     checkRoleExistsById,
     deleteRolePermissionsByIds,
@@ -39,19 +39,20 @@ import {
     findRoleForUpdate,
     insertRolePermissionsByIds,
     updateRoleVersion,
-} from '../../src/repositories/admin-role-repository';
+} from '../../src/repositories/admin/role-repository';
 import {
     getRolePermissionsService,
     getRolePermissionsTreeService,
     getRolesService,
     manageRolePermissionsService,
-} from '../../src/services/admin-role-service';
+} from '../../src/services/admin/admin-role-service';
 
 const queryMock = vi.fn();
 const releaseMock = vi.fn();
 const fakeClient = { query: queryMock, release: releaseMock };
 
 const mockedPool = vi.mocked(pool);
+const mockedCacheDel = vi.mocked(cacheDel);
 const mockedCacheGet = vi.mocked(cacheGet);
 const mockedCacheSet = vi.mocked(cacheSet);
 const mockedCheckRoleExistsById = vi.mocked(checkRoleExistsById);
@@ -89,6 +90,26 @@ describe('admin-role-service', () => {
 
         expect(roles).toEqual([{ id: 2, type: 'assistant' }]);
         expect(mockedCacheSet).toHaveBeenCalledOnce();
+    });
+
+    it('should delete dirty cache and query db when cached roles payload is invalid', async () => {
+        mockedCacheGet.mockResolvedValue('{"bad":true}');
+        mockedFindAllRoles.mockResolvedValue([{ id: 3, type: 'admin' }]);
+
+        const roles = await getRolesService();
+
+        expect(mockedCacheDel).toHaveBeenCalledOnce();
+        expect(roles).toEqual([{ id: 3, type: 'admin' }]);
+    });
+
+    it('should return empty array when no roles exist in db', async () => {
+        mockedCacheGet.mockResolvedValue(null);
+        mockedFindAllRoles.mockResolvedValue([]);
+
+        const roles = await getRolesService();
+
+        expect(roles).toEqual([]);
+        expect(mockedCacheSet).not.toHaveBeenCalled();
     });
 
     it('should return roleExists false when role does not exist', async () => {
@@ -130,6 +151,17 @@ describe('admin-role-service', () => {
         expect(result.data[0].children[0].id).toBe(2);
     });
 
+    it('should return roleExists false when building tree for missing role', async () => {
+        mockedCheckRoleExistsById.mockResolvedValue(false);
+
+        const result = await getRolePermissionsTreeService(1);
+
+        expect(result).toEqual({
+            roleExists: false,
+            data: [],
+        });
+    });
+
     it('should throw RoleVersionConflictError when version mismatch', async () => {
         mockedFindRoleForUpdate.mockResolvedValue({ id: 2, type: 'admin', version: 8 });
 
@@ -140,6 +172,38 @@ describe('admin-role-service', () => {
                 version: 9,
             }),
         ).rejects.toMatchObject({ name: 'RoleVersionConflictError' });
+    });
+
+    it('should throw RoleNotFoundError when target role does not exist', async () => {
+        mockedFindRoleForUpdate.mockResolvedValue(null);
+
+        await expect(
+            manageRolePermissionsService({
+                roleId: 2,
+                permissions: [],
+                version: 1,
+            }),
+        ).rejects.toMatchObject({ name: 'RoleNotFoundError' });
+
+        expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
+    });
+
+    it('should throw PermissionNotFoundError when requested permission is missing', async () => {
+        mockedFindRoleForUpdate.mockResolvedValue({ id: 2, type: 'admin', version: 8 });
+        mockedFindPermissionRowsByModuleTypePairs.mockResolvedValue([{ id: 101 } as never]);
+
+        await expect(
+            manageRolePermissionsService({
+                roleId: 2,
+                permissions: [
+                    { module: 'user', type: 'read' },
+                    { module: 'user', type: 'write' },
+                ],
+                version: 8,
+            }),
+        ).rejects.toMatchObject({ name: 'PermissionNotFoundError' });
+
+        expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
     });
 
     it('should update role permissions successfully', async () => {
@@ -170,6 +234,50 @@ describe('admin-role-service', () => {
         expect(queryMock).toHaveBeenCalledWith('COMMIT');
     });
 
+    it('should dedupe duplicate permissions before lookup', async () => {
+        mockedFindRoleForUpdate.mockResolvedValue({ id: 2, type: 'admin', version: 8 });
+        mockedFindPermissionRowsByModuleTypePairs.mockResolvedValue([
+            { id: 101, module: 'user', type: 'read' },
+        ] as never);
+        mockedFindPermissionIdsByRoleId.mockResolvedValue([]);
+        mockedDeleteRolePermissionsByIds.mockResolvedValue(0);
+        mockedInsertRolePermissionsByIds.mockResolvedValue(1);
+
+        await manageRolePermissionsService({
+            roleId: 2,
+            permissions: [
+                { module: 'user', type: 'read' },
+                { module: 'user', type: 'read' },
+            ],
+            version: 8,
+        });
+
+        expect(mockedFindPermissionRowsByModuleTypePairs).toHaveBeenCalledWith(
+            expect.anything(),
+            [{ module: 'user', type: 'read' }],
+        );
+    });
+
+    it('should wrap rollback failure in manageRolePermissions', async () => {
+        mockedFindRoleForUpdate.mockResolvedValue(null);
+        queryMock.mockImplementation(async (sql: string) => {
+            if (sql === 'ROLLBACK') {
+                throw new Error('rollback failed');
+            }
+            return { rowCount: 1 };
+        });
+
+        await expect(
+            manageRolePermissionsService({
+                roleId: 2,
+                permissions: [],
+                version: 1,
+            }),
+        ).rejects.toMatchObject({
+            message: '[adminRoleService.manageRolePermissions.rollback] rollback failed',
+        });
+    });
+
     it('should return permissions when role exists', async () => {
         mockedCheckRoleExistsById.mockResolvedValue(true);
         mockedFindPermissionsByRoleId.mockResolvedValue([
@@ -187,5 +295,13 @@ describe('admin-role-service', () => {
 
         expect(result.roleExists).toBe(true);
         expect(result.permissions).toHaveLength(1);
+    });
+
+    it('should wrap cache errors in getRolesService', async () => {
+        mockedCacheGet.mockRejectedValue(new Error('redis down'));
+
+        await expect(getRolesService()).rejects.toMatchObject({
+            message: '[adminRoleService.getRoles] redis down',
+        });
     });
 });

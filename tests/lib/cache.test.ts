@@ -33,11 +33,21 @@ vi.mock('../../src/lib/redis-client', () => ({
 
 import {
     buildCacheKey,
+    cacheDel,
     cacheDelMany,
     cacheExists,
+    cacheExpire,
+    cacheGet,
+    cacheGetDel,
     cacheIncrWithTtl,
+    cacheIncr,
+    cacheIsMember,
+    cacheIsOpen,
+    cacheSendCommand,
     cacheSet,
+    cacheSetNoTtl,
     cacheSetMembers,
+    cacheTtl,
 } from '../../src/lib/cache';
 
 describe('cache', () => {
@@ -65,11 +75,64 @@ describe('cache', () => {
         expect(result).toBe(false);
     });
 
+    it('should get cache value', async () => {
+        mockRedisClient.get.mockResolvedValue('value-1');
+        const result = await cacheGet('key-1');
+        expect(result).toBe('value-1');
+    });
+
+    it('should get ttl value', async () => {
+        mockRedisClient.ttl.mockResolvedValue(60);
+        const result = await cacheTtl('key-1');
+        expect(result).toBe(60);
+    });
+
+    it('should get and delete cache value', async () => {
+        mockRedisClient.getDel.mockResolvedValue('value-1');
+        const result = await cacheGetDel('key-1');
+        expect(result).toBe('value-1');
+    });
+
+    it('should delete a cache key', async () => {
+        await cacheDel('key-1');
+        expect(mockRedisClient.del).toHaveBeenCalledWith('key-1');
+    });
+
+    it('should set cache without ttl', async () => {
+        await cacheSetNoTtl('key-1', 'value-1');
+        expect(mockRedisClient.set).toHaveBeenCalledWith('key-1', 'value-1');
+    });
+
+    it('should increment cache key', async () => {
+        mockRedisClient.incr.mockResolvedValue(2);
+        const result = await cacheIncr('count-key');
+        expect(result).toBe(2);
+    });
+
+    it('should set cache expiry with floored ttl', async () => {
+        await cacheExpire('key-1', 3.9);
+        expect(mockRedisClient.expire).toHaveBeenCalledWith('key-1', 3);
+    });
+
+    it('should throw when cacheExpire ttl is invalid', async () => {
+        await expect(cacheExpire('key-1', -1)).rejects.toThrow('ttl 必須是大於 0 的數字');
+    });
+
     it('should clear and repopulate set members with ttl', async () => {
         await cacheSetMembers('set-key', ['a', 'b'], 5.8);
         expect(mockRedisClient.del).toHaveBeenCalledWith('set-key');
         expect(mockRedisClient.sAdd).toHaveBeenCalledWith('set-key', ['a', 'b']);
         expect(mockRedisClient.expire).toHaveBeenCalledWith('set-key', 5);
+    });
+
+    it('should skip set population when members are empty', async () => {
+        await cacheSetMembers('set-key', []);
+        expect(mockRedisClient.del).toHaveBeenCalledWith('set-key');
+        expect(mockRedisClient.sAdd).not.toHaveBeenCalled();
+    });
+
+    it('should throw when cacheSetMembers ttl is invalid', async () => {
+        await expect(cacheSetMembers('set-key', ['a'], 0)).rejects.toThrow('ttl 必須是大於 0 的數字');
     });
 
     it('should return zero for cacheDelMany when no keys provided', async () => {
@@ -84,5 +147,27 @@ describe('cache', () => {
         expect(value).toBe(3);
         expect(mockPipeline.incr).toHaveBeenCalledWith('count-key');
         expect(mockPipeline.expire).toHaveBeenCalledWith('count-key', 10);
+    });
+
+    it('should throw when cacheIncrWithTtl pipeline result is invalid', async () => {
+        mockPipeline.exec.mockResolvedValue(['bad']);
+        await expect(cacheIncrWithTtl('count-key', 10)).rejects.toThrow('cacheIncrWithTtl 執行失敗');
+    });
+
+    it('should check set membership', async () => {
+        mockRedisClient.sIsMember.mockResolvedValue(1);
+        const result = await cacheIsMember('set-key', 'a');
+        expect(result).toBe(true);
+    });
+
+    it('should proxy sendCommand', () => {
+        mockRedisClient.sendCommand.mockReturnValue('ok');
+        const result = cacheSendCommand(['PING']);
+        expect(result).toBe('ok');
+        expect(mockRedisClient.sendCommand).toHaveBeenCalledWith(['PING']);
+    });
+
+    it('should return cache open status', () => {
+        expect(cacheIsOpen()).toBe(true);
     });
 });

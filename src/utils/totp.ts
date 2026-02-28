@@ -1,5 +1,5 @@
 // totp.ts
-import {authenticator} from "otplib";
+import { authenticator } from 'otplib';
 
 // [標記] 改回function，因為這邊用class沒有意義，沒有不同state，不要用class
 // 簡單說，因為它沒有變的不一樣，它就算實例了，還是用同一個資料，所以用class就沒有意義
@@ -38,16 +38,16 @@ authenticator.options = {
 };
 
 // 生成secret，如: JBSWY3DPEHPK3PXP
-export function generateTotpSecret():string {
+export function generateTotpSecret(): string {
     return authenticator.generateSecret();
 }
 
 // 建立QR code用的網址，如: otpauth://totp/ShortURL:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=ShortURL
-export function buildOtpAuthUrl(issuer:string, accountName:string, secret:string):string {
+export function buildOtpAuthUrl(issuer: string, accountName: string, secret: string): string {
     return authenticator.keyuri(accountName, issuer, secret);
 }
 
 // 驗證驗證碼
-export function verifyTotpCode(token:string, secret:string):boolean {
+export function verifyTotpCode(token: string, secret: string): boolean {
     return authenticator.check(token, secret);
 }

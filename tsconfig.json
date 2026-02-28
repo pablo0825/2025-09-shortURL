@@ -1,14 +1,14 @@
-// 為甚麼我可以用cjs跑esm的語法，因為我有開啟esModuleInterop，讓我可以寫esm的語法，之後ts會自動編譯成cjs
+// 專案採用 CommonJS 輸出，並在原始碼維持 TypeScript import/export 寫法
 {
-  "compilerOptions": {
-    "target": "es2020", // 要符合javaScript的哪個版本
-    "module": "CommonJS", // 決定編譯後的模組系統
-    "esModuleInterop": true, // 開啟模組互通性，讓cjs的庫，可以被esm使用
-    "forceConsistentCasingInFileNames": true, // 強制要求檔名的大小寫必須一致
-    "strict": true, // 開啟typeScript的嚴格模式
-    "skipLibCheck": true, // 跳過對.d.ts定義檔(第三方庫)的檢查
-    "outDir": "dist" // 編譯後的檔案要放在哪裡
-  },
-  "include": ["src", "tests"], // 編譯 src 與 tests
-  "files": ["src/types/express.d.ts"] // 明確表示 ide 需要加入這個檔案
+    "compilerOptions": {
+        "target": "es2020", // 要符合javaScript的哪個版本
+        "module": "CommonJS", // 以 CommonJS 方式輸出
+        "esModuleInterop": true, // 開啟模組互通性，讓cjs的庫，可以被esm使用
+        "forceConsistentCasingInFileNames": true, // 強制要求檔名的大小寫必須一致
+        "strict": true, // 開啟typeScript的嚴格模式
+        "skipLibCheck": true, // 跳過對.d.ts定義檔(第三方庫)的檢查
+        "outDir": "dist" // 編譯後的檔案要放在哪裡
+    },
+    "include": ["src", "tests"], // 編譯 src 與 tests
+    "files": ["src/types/express.d.ts"] // 明確表示 ide 需要加入這個檔案
 }

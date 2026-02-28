@@ -28,4 +28,3 @@ router.post('/refresh', generalApiLimiter, refresh);
 router.post('/logout', authenticate, generalApiLimiter, logout);
 router.post('/forgot-password', forgotPasswordLimiter, forgotPassword);
 router.post('/reset-password', resetPasswordLimiter, resetPassword);
-

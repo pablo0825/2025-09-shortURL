@@ -1,18 +1,24 @@
 // long-url-schema.ts
-import { z } from "zod";
+import { z } from 'zod';
 
 const SAFE_SCHEMES = new Set(['http:', 'https:']);
-const STRIP_PARAMS = new Set(['utm_source','utm_medium','utm_campaign','utm_term','utm_content']);
+const STRIP_PARAMS = new Set([
+    'utm_source',
+    'utm_medium',
+    'utm_campaign',
+    'utm_term',
+    'utm_content',
+]);
 const ALLOWED_PORTS = new Set([80, 443]);
 // const FORBIDDEN_RANGES = new Set(["loopback", "private", "linkLocal", "uniqueLocal"]);
 
 type NormOpts = {
-    maxLength?:number
-    allowHash?: boolean,
-    stripTrackingParams?:boolean,
-    shortDomain?:string,
-    allowNonStandardPorts?:boolean,
-}
+    maxLength?: number;
+    allowHash?: boolean;
+    stripTrackingParams?: boolean;
+    shortDomain?: string;
+    allowNonStandardPorts?: boolean;
+};
 
 // 1) 危險換行檢查（涵蓋真換行、字面 \n/\r、%0A/%0D、以及 decode 後）
 // 預防http header injection和log injection的攻擊
@@ -39,7 +45,7 @@ function hasDangerousNewlines(input: string): boolean {
         // 檢查是否有非法字元
         // .test() 用來檢查傳入的字串中，是否有正規表達式中的字元
         if (/[\r\n\u2028\u2029]/.test(decoded)) return true;
-    } catch (_err) {
+    } catch {
         // 無法解碼視為可疑輸入
         return true;
     }
@@ -47,14 +53,19 @@ function hasDangerousNewlines(input: string): boolean {
 }
 
 // 僅允許80, 443通過
-function getEffectivePort (u: URL): number {
+function getEffectivePort(u: URL): number {
     // port必定為數字
     if (u.port) return Number(u.port);
-    return u.protocol === "https:" ? 443 : 80;
+    return u.protocol === 'https:' ? 443 : 80;
 }
 
+interface NormalizeResult {
+    ok: boolean;
+    value?: string;
+    message?: string;
+}
 
-export const longUrlSchema = (opts: NormOpts) => {
+const normalizeLongUrl = (raw: string, opts: NormOpts): NormalizeResult => {
     const {
         maxLength = 2048,
         allowHash = true,
@@ -62,100 +73,123 @@ export const longUrlSchema = (opts: NormOpts) => {
         shortDomain,
         allowNonStandardPorts = false,
     } = opts;
-    return z.string()
+
+    let url: URL;
+    try {
+        url = new URL(raw);
+    } catch {
+        return { ok: false, message: '無效的URL' };
+    }
+
+    if (!SAFE_SCHEMES.has(url.protocol)) {
+        return { ok: false, message: '只支援http, https，其他都拒絕' };
+    }
+
+    if (url.username || url.password) {
+        return { ok: false, message: '不允許包含認證資訊的URL' };
+    }
+
+    const port = getEffectivePort(url);
+    if (!allowNonStandardPorts && !ALLOWED_PORTS.has(port)) {
+        return { ok: false, message: '不允許的通訊埠，僅允許80, 443通行' };
+    }
+
+    url.hostname = url.hostname.replace(/\.$/, '').toLowerCase();
+
+    if (
+        (url.protocol === 'http:' && url.port === '80') ||
+        (url.protocol === 'https:' && url.port === '443')
+    ) {
+        url.port = '';
+    }
+
+    if (!url.pathname) {
+        url.pathname = '/';
+    }
+
+    // //連續出現兩次，替換成 /
+    url.pathname = url.pathname.replace(/\/{2,}/g, '/');
+
+    if (stripTrackingParams) {
+        // 原本的 url ，如：https://example.com/page?utm_source=google&utm_medium=cpc&id=123
+        // 而 STRIP_PARAMS 有 ['utm_source', 'utm_medium']
+        // 那 url 中的 'utm_source', 'utm_medium' 會被移除
+        // 變成：https://example.com/page?id=123
+        // 這是一種標準化 url 的做法
+        for (const p of STRIP_PARAMS) {
+            url.searchParams.delete(p);
+        }
+
+        // 把 query 參數取出，轉成陣列
+        //   https://example.com/page?z=9&b=2&a=1
+        // url.searchParams.entries()，取出參數的鍵值對，如：：['z', '9'], ['b', '2'], ['a', '1']
+        // 轉成陣列
+        // sort 比大小，z 比 b 小，所以 b 往前排，大概是這個概念
+        const entries = Array.from(url.searchParams.entries()).sort(([a], [b]) =>
+            a.localeCompare(b),
+        );
+
+        // 重新組合 url 的 query string (查詢參數)
+        // [k, v] = [z ,9]
+        // '?a=1&b=2...'
+        // encodeURIComponent 會把特殊字元做 url 的編碼
+        url.search = entries.length
+            ? '?' +
+              entries
+                  .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+                  .join('&')
+            : '';
+    }
+
+    if (!allowHash) {
+        url.hash = '';
+    }
+
+    if (shortDomain) {
+        const sd = shortDomain.toLowerCase();
+        if (url.hostname === sd || url.hostname.endsWith('.' + sd)) {
+            return { ok: false, message: '不允許短網址作為長網址' };
+        }
+    }
+
+    const out = url.toString();
+    if (out.length > maxLength) {
+        return { ok: false, message: 'URL太長' };
+    }
+
+    return { ok: true, value: out };
+};
+
+export const longUrlSchema = (opts: NormOpts) => {
+    const { maxLength = 2048 } = opts;
+
+    return z
+        .string()
         .superRefine((v, ctx) => {
             // 原始控制字元（含 CR/LF）先擋一層
             // 這邊好像擋住了32種控制字元
             if (/[\u0000-\u001F\u007F]/.test(v)) {
-                ctx.addIssue({ code: "custom", message: "URL有控制字元" });
+                ctx.addIssue({ code: 'custom', message: 'URL有控制字元' });
                 return;
             }
             if (hasDangerousNewlines(v)) {
-                ctx.addIssue({ code: "custom", message: "URL含非法換行/回車符" });
+                ctx.addIssue({ code: 'custom', message: 'URL含非法換行/回車符' });
             }
         })
-        .min(1, "longUrl是必須的")
-        .max(maxLength, "longUrl不能超過2048字元")
+        .min(1, 'longUrl是必須的')
+        .max(maxLength, 'longUrl不能超過2048字元')
         .trim()
+        .superRefine((raw, ctx) => {
+            const normalized = normalizeLongUrl(raw, opts);
+            if (!normalized.ok) {
+                ctx.addIssue({
+                    code: 'custom',
+                    message: normalized.message ?? '無效的URL',
+                });
+            }
+        })
         .transform((raw) => {
-            let url:URL;
-            // 驗證是否為URL
-            try {
-                url = new URL(raw);
-            } catch {
-                throw new Error("無效的URL");
-            }
-            // 只允許http, https，其他都拒絕
-            if (!SAFE_SCHEMES.has(url.protocol)) {
-                throw new Error("只支援http, https，其他都拒絕")
-            }
-            // 禁用 URL 認證資訊（避免 user:pass@host）
-            if (url.username || url.password) {
-                throw new Error("不允許包含認證資訊的URL");
-            }
-            // 僅允許80, 443通行
-            const port:number = getEffectivePort(url);
-            if (!allowNonStandardPorts && !ALLOWED_PORTS.has(port)) {
-                throw new Error("不允許的通訊埠，僅允許80, 443通行")
-            }
-            // 移除尾端點，轉成小寫
-            // www.example.com. ⭢ www.example.com
-            // WwW.eXaMpLe.CoM ⭢ www.example.com
-            url.hostname = url.hostname.replace(/\.$/, '').toLowerCase();
-
-            // 移除預設 port, example.com:443 ⭢ example.com
-            if ((url.protocol === 'http:' && url.port === '80') ||
-            (url.protocol === 'https:' && url.port === '443')) {
-                url.port = '';
-            }
-
-            // https://example.com → https://example.com／
-            if (!url.pathname) url.pathname = '/';
-
-            // 合併連續斜線
-            // /api//v1/users///profile → /api/v1/users/profile
-            url.pathname = url.pathname.replace(/\/{2,}/g, '/');
-
-            // 清理/排序 query 參數 (看不太懂)
-            // url中的查詢參數的清理, 正規化
-            // https://shop.example.com/item/123?medium=social&sort=price&session=abc&a=10&utm_source=fb_ad
-            // https://shop.example.com/item/123?a=10&sort=price
-            if (stripTrackingParams) {
-                // 把查詢參數逐一拿出來，如果有符合的，就刪除該查詢參數
-                for (const p of STRIP_PARAMS) url.searchParams.delete(p);
-
-                // url.searchParams.entries() 取得剩餘的所有查詢參數
-                // .sort() 排序
-                // a.localeCompare() 基於件鍵值的key的字母排序
-                const entries = Array.from(url.searchParams.entries()).sort(([a],[b]) => a.localeCompare(b));
-
-                // 如果還有查詢參數就重組，沒有的話就接上空字串
-                // ${encodeURIComponent(k)}=${encodeURIComponent(v)}
-                // ['a', '10'] → a=10
-                url.search = entries.length ? '?' + entries.map(([k,v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&') : '';
-            }
-
-            // 是否保留#...後面的內容
-            // https://example.com/page#section-3
-            if(!allowHash) url.hash = "";
-
-            // 禁止把短網址再次變成短網址
-            if(shortDomain) {
-                // 轉成小寫
-                const sd = shortDomain.toLowerCase();
-
-                if (url.hostname === sd || url.hostname.endsWith("." + sd)) {
-                    throw new Error("不允許短網址作為長網址");
-                }
-            }
-
-            const out = url.toString();
-
-            // ✅ 最終長度再檢一次（transform 後）
-            if (out.length > maxLength) {
-                throw new Error("URL太長");
-            }
-
-            return out; })
-
+            const normalized = normalizeLongUrl(raw, opts);
+            return normalized.value ?? raw;
+        });
 };
