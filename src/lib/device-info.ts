@@ -1,15 +1,14 @@
-// deviceInfo.ts
 import { UAParser } from 'ua-parser-js';
 
-type DeviceInfo = {
-    deviceType: string; // mobile/tablet/desktop/console/smarttv/wearable/embedded/unknown
+export interface DeviceInfo {
+    deviceType: string;
     deviceModel: string | null;
     deviceVendor: string | null;
     osName: string | null;
     osVersion: string | null;
     browserName: string | null;
     browserVersion: string | null;
-};
+}
 
 export const parseUserAgentToDeviceInfo = (userAgent: string | null): DeviceInfo => {
     if (!userAgent) {
@@ -30,7 +29,7 @@ export const parseUserAgentToDeviceInfo = (userAgent: string | null): DeviceInfo
     const browser = parser.getBrowser();
 
     return {
-        deviceType: device.type ?? 'desktop', // 若無 type 通常可視為 desktop
+        deviceType: device.type ?? 'desktop',
         deviceModel: device.model ?? null,
         deviceVendor: device.vendor ?? null,
         osName: os.name ?? null,

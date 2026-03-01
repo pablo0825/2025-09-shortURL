@@ -8,7 +8,7 @@ import type {
 } from '../../schemas/auth-schema';
 import { jwtProvider } from '../../utils/jwt-provider';
 import { signTwofaToken, verifyTwofaToken } from '../../utils/jwt-twofa-token';
-import { parseUserAgentToDeviceInfo } from '../../utils/device-info';
+import { parseUserAgentToDeviceInfo } from '../../lib/device-info';
 import { verifyTotpCode } from '../../utils/totp';
 import { decrypt } from '../../utils/crypto-utils';
 import { consumeBackupCodes } from '../../utils/backup-codes';
