@@ -1,18 +1,23 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/pool';
-import type { UsersListDto } from '../../schemas/admin-schema';
+import type { AssignUserRoleDto, UsersListDto } from '../../schemas/admin-schema';
 import type { SessionListItem } from '../../types/types';
 import { AppError } from '../../utils/app-error';
 import {
+    checkUserExistsById,
     countUsersByWhereSql,
     disableUserTwofaState,
+    checkUserRoleExists,
     findActiveSessionsByUserId,
     findActiveUserForDeactivateForUpdate,
     findActiveUserTwofaStateForUpdate,
     findInactiveUserForRestoreForUpdate,
+    findRoleByType,
+    findRoleTypesByUserId,
     findRolesByUserIds,
     findUserById,
     findUsersByWhereSql,
+    insertUserRoleByIds,
     restoreInactiveUser,
     revokeAllBackupCodes,
     revokeBackupCodesByVersion,
@@ -102,6 +107,19 @@ interface RestoreUserResult {
     };
 }
 
+interface AddUserRoleResult {
+    before: {
+        roles: string[];
+    };
+    after: {
+        roles: string[];
+    };
+    affected: {
+        inserted: number;
+    };
+    addedRole: AssignUserRoleDto['role'];
+}
+
 const wrapServiceError = (context: string, error: unknown): AppError => {
     if (error instanceof AppError) {
         return new AppError(error.statusCode, `[${context}] ${error.message}`, error.code);
@@ -111,6 +129,14 @@ const wrapServiceError = (context: string, error: unknown): AppError => {
 
     if (error instanceof Error && error.name === 'UserNotFoundError') {
         return new AppError(404, `[${context}] ${msg}`, error.name);
+    }
+
+    if (error instanceof Error && error.name === 'RoleNotFoundError') {
+        return new AppError(404, `[${context}] ${msg}`, error.name);
+    }
+
+    if (error instanceof Error && error.name === 'UserRoleAlreadyExistsError') {
+        return new AppError(409, `[${context}] ${msg}`, error.name);
     }
 
     return new AppError(500, `[${context}] ${msg}`);
@@ -213,6 +239,74 @@ export const getUserService = async (targetId: number) => {
         return user;
     } catch (error) {
         throw wrapServiceError('adminUserService.getUser', error);
+    }
+};
+
+export const addUserRoleService = async (
+    targetUserId: number,
+    roleType: AssignUserRoleDto['role'],
+): Promise<AddUserRoleResult> => {
+    let client: PoolClient | undefined;
+
+    try {
+        client = await pool.connect();
+        await client.query('BEGIN');
+
+        const userExists = await checkUserExistsById(client, targetUserId);
+        if (!userExists) {
+            const notFoundError = new Error('User not found');
+            notFoundError.name = 'UserNotFoundError';
+            throw notFoundError;
+        }
+
+        const beforeRoles = await findRoleTypesByUserId(client, targetUserId);
+        const role = await findRoleByType(client, roleType);
+
+        if (!role) {
+            const notFoundError = new Error('Role not found');
+            notFoundError.name = 'RoleNotFoundError';
+            throw notFoundError;
+        }
+
+        const alreadyExists = await checkUserRoleExists(client, targetUserId, role.id);
+        if (alreadyExists) {
+            const conflictError = new Error('User role already exists');
+            conflictError.name = 'UserRoleAlreadyExistsError';
+            throw conflictError;
+        }
+
+        await insertUserRoleByIds(client, targetUserId, role.id);
+
+        const afterRoles = await findRoleTypesByUserId(client, targetUserId);
+
+        await client.query('COMMIT');
+
+        return {
+            before: {
+                roles: beforeRoles,
+            },
+            after: {
+                roles: afterRoles,
+            },
+            affected: {
+                inserted: 1,
+            },
+            addedRole: roleType,
+        };
+    } catch (error) {
+        if (client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                throw wrapServiceError('adminUserService.addUserRole.rollback', rollbackError);
+            }
+        }
+
+        throw wrapServiceError('adminUserService.addUserRole', error);
+    } finally {
+        if (client) {
+            client.release();
+        }
     }
 };
 

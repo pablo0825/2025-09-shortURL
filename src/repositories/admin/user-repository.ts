@@ -15,6 +15,15 @@ export interface AdminUserRoleRow {
     type: string;
 }
 
+export interface AdminUserRoleTypeRow {
+    type: string;
+}
+
+export interface AdminRoleLookupRow {
+    id: number;
+    type: string;
+}
+
 export interface AdminUserDetailRow {
     id: number;
     email: string;
@@ -166,6 +175,62 @@ export const findRolesByUserIds = async (
 
     const result = await client.query<AdminUserRoleRow>(roleSql, [userIds]);
     return result.rows;
+};
+
+export const checkUserExistsById = async (
+    client: PoolClient,
+    userId: number,
+): Promise<boolean> => {
+    const result = await client.query('SELECT 1 FROM users WHERE id = $1 LIMIT 1', [userId]);
+    return (result.rowCount ?? 0) > 0;
+};
+
+export const findRoleTypesByUserId = async (
+    client: PoolClient,
+    userId: number,
+): Promise<string[]> => {
+    const sql =
+        'SELECT r.type FROM user_role ur JOIN role r ON r.id = ur.role_id WHERE ur.user_id = $1 ORDER BY r.id ASC';
+    const result = await client.query<AdminUserRoleTypeRow>(sql, [userId]);
+
+    return result.rows.map((row) => row.type);
+};
+
+export const findRoleByType = async (
+    client: PoolClient,
+    roleType: string,
+): Promise<AdminRoleLookupRow | null> => {
+    const result = await client.query<AdminRoleLookupRow>(
+        'SELECT id, type FROM role WHERE type = $1 LIMIT 1',
+        [roleType],
+    );
+
+    if (result.rowCount === 0) {
+        return null;
+    }
+
+    return result.rows[0];
+};
+
+export const checkUserRoleExists = async (
+    client: PoolClient,
+    userId: number,
+    roleId: number,
+): Promise<boolean> => {
+    const result = await client.query(
+        'SELECT 1 FROM user_role WHERE user_id = $1 AND role_id = $2 LIMIT 1',
+        [userId, roleId],
+    );
+
+    return (result.rowCount ?? 0) > 0;
+};
+
+export const insertUserRoleByIds = async (
+    client: PoolClient,
+    userId: number,
+    roleId: number,
+): Promise<void> => {
+    await client.query('INSERT INTO user_role(user_id, role_id) VALUES ($1, $2)', [userId, roleId]);
 };
 
 export const findUserById = async (targetId: number): Promise<AdminUserDetailRow | null> => {

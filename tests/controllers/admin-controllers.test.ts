@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../src/services/admin/admin-user-service', () => ({
+    addUserRoleService: vi.fn(),
     deactivateUserService: vi.fn(),
     getUserService: vi.fn(),
     getUsersService: vi.fn(),
@@ -33,6 +34,7 @@ import {
     getRolePermissions as rawGetRolePermissions,
     getRolePermissionsTree as rawGetRolePermissionsTree,
     getRoles as rawGetRoles,
+    setUserRole as rawSetUserRole,
     getUser as rawGetUser,
     getUserSessions as rawGetUserSessions,
     getUsers as rawGetUsers,
@@ -42,6 +44,7 @@ import {
 } from '../../src/controllers/admin-controllers';
 import { errorHandler } from '../../src/middlewares/error/error-handler';
 import {
+    addUserRoleService,
     deactivateUserService,
     getUserService,
     getUserSessionsService,
@@ -62,6 +65,7 @@ import { AppError } from '../../src/utils/app-error';
 const mockedGetUsersService = vi.mocked(getUsersService);
 const mockedGetUserService = vi.mocked(getUserService);
 const mockedGetUserSessionsService = vi.mocked(getUserSessionsService);
+const mockedAddUserRoleService = vi.mocked(addUserRoleService);
 const mockedResetUser2faService = vi.mocked(resetUser2faService);
 const mockedRestoreUserService = vi.mocked(restoreUserService);
 const mockedDeactivateUserService = vi.mocked(deactivateUserService);
@@ -101,6 +105,7 @@ const getRoles = withErrorHandler(rawGetRoles);
 const getRolePermissions = withErrorHandler(rawGetRolePermissions);
 const getRolePermissionsTree = withErrorHandler(rawGetRolePermissionsTree);
 const manageRolePermissions = withErrorHandler(rawManageRolePermissions);
+const setUserRole = withErrorHandler(rawSetUserRole);
 
 const buildRes = () => {
     const status = vi.fn().mockReturnThis();
@@ -805,5 +810,62 @@ describe('admin-controllers', () => {
         await Promise.resolve();
 
         expect(logger.warn).toHaveBeenCalledWith('[audit] write failed', expect.any(Error));
+    });
+
+    it('should return 200 in setUserRole when service succeeds', async () => {
+        mockedAddUserRoleService.mockResolvedValue({
+            before: { roles: ['user'] },
+            after: { roles: ['user', 'assistant'] },
+            affected: { inserted: 1 },
+            addedRole: 'assistant',
+        });
+
+        const req = {
+            user: { id: 1, role: 'admin' },
+            params: { id: '2' },
+            body: { role: 'assistant' },
+            get: vi.fn().mockReturnValue('ua'),
+            originalUrl: '/admin/users/2/role',
+            ip: '1.1.1.1',
+        } as never;
+        const res = buildRes();
+
+        await setUserRole(req, res as never);
+
+        expect(mockedAddUserRoleService).toHaveBeenCalledWith(2, 'assistant');
+        expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    it('should return 400 in setUserRole when body is invalid', async () => {
+        const req = {
+            user: { id: 1, role: 'admin' },
+            params: { id: '2' },
+            body: { role: 'admin' },
+        } as never;
+        const res = buildRes();
+
+        await setUserRole(req, res as never);
+
+        expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    it('should return 409 in setUserRole when role already exists', async () => {
+        mockedAddUserRoleService.mockRejectedValue(
+            new AppError(409, 'exists', 'UserRoleAlreadyExistsError'),
+        );
+
+        const req = {
+            user: { id: 1, role: 'admin' },
+            params: { id: '2' },
+            body: { role: 'assistant' },
+            get: vi.fn().mockReturnValue('ua'),
+            originalUrl: '/admin/users/2/role',
+            ip: '1.1.1.1',
+        } as never;
+        const res = buildRes();
+
+        await setUserRole(req, res as never);
+
+        expect(res.status).toHaveBeenCalledWith(409);
     });
 });

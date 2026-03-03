@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import crypto from 'crypto';
+import path from 'path';
 
 const { queryMock, releaseMock, writeFileMock, unlinkMock, mkdirMock, toBufferMock } = vi.hoisted(
     () => ({
@@ -190,7 +191,7 @@ describe('user-security-service', () => {
         expect(result.filename).toBe('00000000-0000-4000-8000-000000000000.webp');
         expect(result.url).toBe('/static/avatars/7/00000000-0000-4000-8000-000000000000.webp');
         expect(unlinkMock).toHaveBeenCalledWith(
-            expect.stringContaining('uploads/avatars/7/old.webp'),
+            expect.stringContaining(path.join('uploads', 'avatars', '7', 'old.webp')),
         );
     });
 
@@ -229,7 +230,14 @@ describe('user-security-service', () => {
 
         expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
         expect(unlinkMock).toHaveBeenCalledWith(
-            expect.stringContaining('uploads/avatars/7/00000000-0000-4000-8000-000000000000.webp'),
+            expect.stringContaining(
+                path.join(
+                    'uploads',
+                    'avatars',
+                    '7',
+                    '00000000-0000-4000-8000-000000000000.webp',
+                ),
+            ),
         );
     });
 
@@ -248,7 +256,7 @@ describe('user-security-service', () => {
 
         expect(mockedClearUserAvatarKey).toHaveBeenCalledOnce();
         expect(unlinkMock).toHaveBeenCalledWith(
-            expect.stringContaining('uploads/avatars/7/old.webp'),
+            expect.stringContaining(path.join('uploads', 'avatars', '7', 'old.webp')),
         );
         expect(mockedWriteUserLogToDB).toHaveBeenCalled();
         expect(queryMock).toHaveBeenCalledWith('COMMIT');

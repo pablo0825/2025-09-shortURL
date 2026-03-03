@@ -74,3 +74,10 @@ export const roleArraySchema = z.array(
         type: z.string().min(1),
     }),
 );
+
+export const assignUserRoleSchema = z.object({
+    role: z.enum(['user', 'assistant']),
+});
+
+export type AssignUserRoleDto = z.infer<typeof assignUserRoleSchema>;
+

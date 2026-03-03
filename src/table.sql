@@ -356,4 +356,40 @@
 
 -- INSERT INTO role_permissions (role_id, permissions_id) VALUES (2, 11);
 
-INSERT INTO role_permissions (role_id, permissions_id) VALUES (2, 13);
+-- INSERT INTO role_permissions (role_id, permissions_id) VALUES (2, 13);
+
+-- 2026-03-03
+-- 修改 links table ，加入新欄位
+-- ALTER TABLE links ADD COLUMN  creator_user_id BIGINT NULL REFERENCES users(id) ON DELETE CASCADE, -- 創建人id
+--     ADD COLUMN updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), -- 更新 lunk 的時間
+--     ADD COLUMN deleted_at TIMESTAMPTZ NULL, -- 刪除 link (軟刪除)
+--     ADD COLUMN click_count BIGINT NOT NULL DEFAULT 0, -- link 的點擊次數統計
+--     ADD COLUMN last_clicked_at TIMESTAMPTZ NULL, -- link 的最後被點擊的時間
+--     ADD CONSTRAINT links_click_count_non_negative CHECK (click_count >= 0); -- link 的點擊數需要大於等於0
+--
+-- CREATE INDEX idx_links_is_active ON links (is_active);
+-- CREATE INDEX idx_links_creator_user_id ON links (creator_user_id);
+-- CREATE INDEX idx_links_click_count ON links (click_count DESC);
+-- CREATE INDEX idx_links_last_clicked_at ON links (last_clicked_at DESC);
+
+-- 加入新的 table ，link_click_events
+-- CREATE TABLE link_click_events (
+--     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+--     link_id BIGINT NOT NULL,
+--     clicked_at TIMESTAMPTZ NOT NULL DEFAULT now(), -- link 點擊時間
+--     visitor_ip INET,
+--     referer TEXT, -- 來源頁
+--     user_agent TEXT, -- 保留原始ua
+--     device_type VARCHAR(20), -- 裝置來源，下方有限制，只接受特定字串
+--     country_code CHAR(2), -- 存 ISO 2碼，如 TW，下方有限制，只接受兩個英文字大寫
+--
+--     CONSTRAINT fk_link_click_events_link FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE,
+--
+--     CONSTRAINT chk_link_click_events_device_type CHECK (device_type IS NULL OR device_type IN ('desktop', 'mobile', 'tablet', 'bot', 'unknown')),
+--
+--     CONSTRAINT chk_link_click_events_country_code CHECK (country_code IS NULL OR country_code ~ '^[A-Z]{2}$')
+-- );
+--
+-- CREATE INDEX idx_link_click_events_clicked_at ON link_click_events (clicked_at DESC);
+--
+-- CREATE INDEX idx_link_click_events_link_id_clicked_at ON link_click_events (link_id, clicked_at DESC);

@@ -7,11 +7,16 @@ vi.mock('../../src/db/pool', () => ({
 }));
 
 vi.mock('../../src/repositories/admin/user-repository', () => ({
+    checkUserExistsById: vi.fn(),
+    checkUserRoleExists: vi.fn(),
     countUsersByWhereSql: vi.fn(),
     findActiveSessionsByUserId: vi.fn(),
     findRolesByUserIds: vi.fn(),
+    findRoleByType: vi.fn(),
+    findRoleTypesByUserId: vi.fn(),
     findUserById: vi.fn(),
     findUsersByWhereSql: vi.fn(),
+    insertUserRoleByIds: vi.fn(),
     disableUserTwofaState: vi.fn(),
     findActiveUserForDeactivateForUpdate: vi.fn(),
     findActiveUserTwofaStateForUpdate: vi.fn(),
@@ -26,15 +31,20 @@ vi.mock('../../src/repositories/admin/user-repository', () => ({
 
 import { pool } from '../../src/db/pool';
 import {
+    checkUserExistsById,
+    checkUserRoleExists,
     countUsersByWhereSql,
     disableUserTwofaState,
     findActiveSessionsByUserId,
     findActiveUserForDeactivateForUpdate,
     findActiveUserTwofaStateForUpdate,
     findInactiveUserForRestoreForUpdate,
+    findRoleByType,
+    findRoleTypesByUserId,
     findRolesByUserIds,
     findUserById,
     findUsersByWhereSql,
+    insertUserRoleByIds,
     restoreInactiveUser,
     revokeAllBackupCodes,
     revokeBackupCodesByVersion,
@@ -43,6 +53,7 @@ import {
     softDeleteActiveUser,
 } from '../../src/repositories/admin/user-repository';
 import {
+    addUserRoleService,
     deactivateUserService,
     getUserService,
     getUsersService,
@@ -56,10 +67,15 @@ const releaseMock = vi.fn();
 const fakeClient = { query: queryMock, release: releaseMock };
 
 const mockedPool = vi.mocked(pool);
+const mockedCheckUserExistsById = vi.mocked(checkUserExistsById);
+const mockedCheckUserRoleExists = vi.mocked(checkUserRoleExists);
 const mockedCountUsersByWhereSql = vi.mocked(countUsersByWhereSql);
 const mockedFindUsersByWhereSql = vi.mocked(findUsersByWhereSql);
 const mockedFindRolesByUserIds = vi.mocked(findRolesByUserIds);
+const mockedFindRoleByType = vi.mocked(findRoleByType);
+const mockedFindRoleTypesByUserId = vi.mocked(findRoleTypesByUserId);
 const mockedFindUserById = vi.mocked(findUserById);
+const mockedInsertUserRoleByIds = vi.mocked(insertUserRoleByIds);
 const mockedFindActiveSessionsByUserId = vi.mocked(findActiveSessionsByUserId);
 const mockedFindActiveUserTwofaStateForUpdate = vi.mocked(findActiveUserTwofaStateForUpdate);
 const mockedDisableUserTwofaState = vi.mocked(disableUserTwofaState);
@@ -148,6 +164,61 @@ describe('admin-user-service', () => {
         const result = await getUserService(9);
 
         expect(result).toEqual({ id: 9, email: 'u@example.com' });
+    });
+
+    it('should add user role successfully', async () => {
+        mockedCheckUserExistsById.mockResolvedValue(true);
+        mockedFindRoleTypesByUserId
+            .mockResolvedValueOnce(['user'])
+            .mockResolvedValueOnce(['user', 'assistant']);
+        mockedFindRoleByType.mockResolvedValue({ id: 3, type: 'assistant' });
+        mockedCheckUserRoleExists.mockResolvedValue(false);
+        mockedInsertUserRoleByIds.mockResolvedValue(undefined);
+
+        const result = await addUserRoleService(7, 'assistant');
+
+        expect(result.before.roles).toEqual(['user']);
+        expect(result.after.roles).toEqual(['user', 'assistant']);
+        expect(result.affected.inserted).toBe(1);
+        expect(queryMock).toHaveBeenCalledWith('COMMIT');
+    });
+
+    it('should throw UserNotFoundError when adding role for missing user', async () => {
+        mockedCheckUserExistsById.mockResolvedValue(false);
+
+        await expect(addUserRoleService(7, 'assistant')).rejects.toMatchObject({
+            statusCode: 404,
+            code: 'UserNotFoundError',
+        });
+
+        expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
+    });
+
+    it('should throw RoleNotFoundError when target role does not exist', async () => {
+        mockedCheckUserExistsById.mockResolvedValue(true);
+        mockedFindRoleTypesByUserId.mockResolvedValue([]);
+        mockedFindRoleByType.mockResolvedValue(null);
+
+        await expect(addUserRoleService(7, 'assistant')).rejects.toMatchObject({
+            statusCode: 404,
+            code: 'RoleNotFoundError',
+        });
+
+        expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
+    });
+
+    it('should throw UserRoleAlreadyExistsError when user already has role', async () => {
+        mockedCheckUserExistsById.mockResolvedValue(true);
+        mockedFindRoleTypesByUserId.mockResolvedValue(['assistant']);
+        mockedFindRoleByType.mockResolvedValue({ id: 3, type: 'assistant' });
+        mockedCheckUserRoleExists.mockResolvedValue(true);
+
+        await expect(addUserRoleService(7, 'assistant')).rejects.toMatchObject({
+            statusCode: 409,
+            code: 'UserRoleAlreadyExistsError',
+        });
+
+        expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
     });
 
     it('should mark session status correctly', async () => {

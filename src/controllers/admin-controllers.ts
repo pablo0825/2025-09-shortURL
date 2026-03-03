@@ -3,6 +3,7 @@ import { type NextFunction, type Request, type Response } from 'express';
 import { recordAdminAuditLogService } from '../services/admin/admin-audit-log-service';
 import {
     usersListSchema,
+    assignUserRoleSchema,
     userIdSchema,
     userRoleSchema,
     userRoleIdSchema,
@@ -13,6 +14,7 @@ import { type RoleItem } from '../types/types';
 import { logger } from '../lib/logger';
 import { AppError } from '../utils/app-error';
 import {
+    addUserRoleService,
     deactivateUserService,
     getUserService,
     getUsersService,
@@ -1027,6 +1029,124 @@ export const manageRolePermissions = async (
             targetDisplay: null,
             requestPath: req.originalUrl,
             requestMethod: AuditRequestMethod.PATCH,
+            requestIp: req.ip,
+            userAgent: req.get('user-agent') ?? null,
+            status: AuditStatus.Failed,
+            errorMessage: msg,
+            diff: null,
+        }).catch((auditErr) => {
+            logger.warn('[audit] write failed', auditErr);
+        });
+
+        next(err);
+        return;
+    }
+};
+
+// PUT /admin/users/:id/role
+// 指派使用者角色（整體覆寫）
+export const setUserRole = async (
+    req: Request,
+    res: Response,
+    next: NextFunction = () => undefined,
+) => {
+    const userIdParams = userIdSchema.safeParse(req.user?.id);
+
+    if (!userIdParams.success) {
+        const msg: string = userIdParams.error.issues[0]?.message ?? '未登入';
+        nextAppError(next, 401, msg);
+        return;
+    }
+
+    const userId: number = userIdParams.data;
+
+    const userRoleParams = userRoleSchema.safeParse(req.user?.role);
+
+    if (!userRoleParams.success) {
+        const msg: string = userRoleParams.error.issues[0]?.message ?? '權限不足';
+        nextAppError(next, 403, msg);
+        return;
+    }
+
+    const userRole: 'admin' | 'assistant' = userRoleParams.data;
+
+    if (userRole !== 'admin') {
+        nextAppError(next, 403, '權限不足');
+        return;
+    }
+
+    const targetIdParams = userIdSchema.safeParse(req.params.id);
+
+    if (!targetIdParams.success) {
+        const msg: string = targetIdParams.error.issues[0]?.message ?? '非法 id';
+        nextAppError(next, 400, msg);
+        return;
+    }
+
+    const targetId: number = targetIdParams.data;
+
+    const assignableRolesParams = assignUserRoleSchema.safeParse(req.body);
+
+    if (!assignableRolesParams.success) {
+        const msg: string = assignableRolesParams.error.issues[0]?.message ?? '資料格式錯誤';
+        nextAppError(next, 400, msg);
+        return;
+    }
+
+    const assignableRole: 'user' | 'assistant' = assignableRolesParams.data.role;
+
+    try {
+        const result = await addUserRoleService(targetId, assignableRole);
+
+        void recordAdminAuditLogService({
+            actorUserId: userId,
+            actorRole: userRole,
+            action: 'set_user_role',
+            targetType: AuditTargetType.Role,
+            targetId,
+            targetDisplay: result.addedRole,
+            requestPath: req.originalUrl,
+            requestMethod: AuditRequestMethod.PUT,
+            requestIp: req.ip,
+            userAgent: req.get('user-agent') ?? null,
+            status: AuditStatus.Success,
+            errorMessage: null,
+            diff: {
+                before: {
+                    roles: result.before.roles,
+                },
+                after: {
+                    roles: result.after.roles,
+                },
+                affected: result.affected,
+                meta: {
+                    addedRole: result.addedRole,
+                },
+            },
+        }).catch((err) => {
+            logger.warn('[audit] write failed', err);
+        });
+
+        return res.status(200).json({
+            ok: true,
+            message: '角色新增成功',
+            data: {
+                addedRole: result.addedRole,
+                roles: result.after.roles,
+            },
+        });
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+
+        void recordAdminAuditLogService({
+            actorUserId: userId,
+            actorRole: userRole,
+            action: 'set_user_role',
+            targetType: AuditTargetType.Role,
+            targetId,
+            targetDisplay: null,
+            requestPath: req.originalUrl,
+            requestMethod: AuditRequestMethod.PUT,
             requestIp: req.ip,
             userAgent: req.get('user-agent') ?? null,
             status: AuditStatus.Failed,
