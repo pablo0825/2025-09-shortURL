@@ -247,10 +247,12 @@ auth api 大多已經完成，如下，剩下驗證email的api，等完成user, 
 - [x] 恢復使用者 restoreUser
 - [x] 取得角色權限 getRolePermission
 - [x] 設定角色權限 manageRolePermission
-- [ ] 分配角色給使用者 assignRolesToUser
-- [ ] 查詢所有link getAllLink
-- [ ] 查詢指定link getLink
-- [ ] 停用指定link DeactivateLink
+- [x] 分配角色給使用者 assignRolesToUser
+- [x] 查詢所有link getAllLink
+- [x] 查詢指定link getLink
+- [ ] 停用指定link 
+- [ ] 刪除指定link
+- [ ] 恢復指定link
 - [ ] 查詢log 
 - [ ] 查詢使用者統計資料
 - [ ] 查詢link統計資料
