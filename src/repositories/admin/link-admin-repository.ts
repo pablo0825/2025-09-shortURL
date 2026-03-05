@@ -44,6 +44,21 @@ export interface ListAdminLinksRepositoryResult {
     total: number;
 }
 
+export interface AdminLinkDetailRow {
+    id: number;
+    code: string | null;
+    long_url: string;
+    created_at: string;
+    updated_at: string;
+    expire_at: string;
+    deleted_at: string | null;
+    click_count: string;
+    last_clicked_at: string | null;
+    is_active: boolean;
+    creator_user_id: number | null;
+    creator_email: string | null;
+}
+
 const buildWhereClause = (input: ListAdminLinksQuery): AdminLinksFilterResult => {
     const filters: string[] = [];
     const values: Array<string> = [];
@@ -149,7 +164,7 @@ export const listAdminLinks = async (
         ${whereSql}
     `;
 
-    const listValues = [...values, String(input.limit), String(offset)];
+    const listValues:string[] = [...values, String(input.limit), String(offset)];
     const [listResult, countResult] = await Promise.all([
         pool.query<AdminLinkListRow>(listSql, listValues),
         pool.query<{ total: string }>(countSql, values),
@@ -159,4 +174,29 @@ export const listAdminLinks = async (
         rows: listResult.rows,
         total: Number(countResult.rows[0]?.total ?? '0'),
     };
+};
+
+export const findAdminLinkById = async (id: number): Promise<AdminLinkDetailRow | null> => {
+    const sql = `
+        SELECT
+            l.id::BIGINT AS id,
+            l.code,
+            l.long_url,
+            l.created_at::TEXT AS created_at,
+            l.updated_at::TEXT AS updated_at,
+            l.expire_at::TEXT AS expire_at,
+            l.deleted_at::TEXT AS deleted_at,
+            l.click_count::TEXT AS click_count,
+            l.last_clicked_at::TEXT AS last_clicked_at,
+            l.is_active,
+            l.creator_user_id::BIGINT AS creator_user_id,
+            u.email AS creator_email
+        FROM links l
+        LEFT JOIN users u ON u.id = l.creator_user_id
+        WHERE l.id = $1
+        LIMIT 1
+    `;
+
+    const result = await pool.query<AdminLinkDetailRow>(sql, [id]);
+    return result.rows[0] ?? null;
 };

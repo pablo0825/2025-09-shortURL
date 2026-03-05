@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { adminLinksQuerySchema } from '../../src/schemas/admin-schema';
+import { adminLinkIdParamSchema, adminLinksQuerySchema } from '../../src/schemas/admin-schema';
 
 describe('admin-links-query-schema', () => {
     it('should parse valid query', () => {
@@ -61,5 +61,14 @@ describe('admin-links-query-schema', () => {
         });
 
         expect(parsed.success).toBe(false);
+    });
+
+    it('should parse valid link id param', () => {
+        const parsed = adminLinkIdParamSchema.safeParse('101');
+
+        expect(parsed.success).toBe(true);
+        if (parsed.success) {
+            expect(parsed.data).toBe(101);
+        }
     });
 });

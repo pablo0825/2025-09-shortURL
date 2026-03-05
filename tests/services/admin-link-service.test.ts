@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../src/repositories/admin/link-admin-repository', () => ({
     listAdminLinks: vi.fn(),
+    findAdminLinkById: vi.fn(),
 }));
 
-import { listAdminLinks } from '../../src/repositories/admin/link-admin-repository';
-import { getAdminLinksService } from '../../src/services/admin/admin-link-service';
+import { findAdminLinkById, listAdminLinks } from '../../src/repositories/admin/link-admin-repository';
+import { getAdminLinkByIdService, getAdminLinksService } from '../../src/services/admin/admin-link-service';
 
 const mockedListAdminLinks = vi.mocked(listAdminLinks);
+const mockedFindAdminLinkById = vi.mocked(findAdminLinkById);
 
 describe('admin-link-service', () => {
     beforeEach(() => {
@@ -126,6 +128,39 @@ describe('admin-link-service', () => {
             }),
         ).rejects.toMatchObject({
             message: '[adminLinkService.getAdminLinks] db down',
+        });
+    });
+
+    it('should return link detail for existing id', async () => {
+        mockedFindAdminLinkById.mockResolvedValue({
+            id: 101,
+            code: 'abc123',
+            long_url: 'https://example.com/page?a=1',
+            created_at: '2026-03-03T10:00:00.000Z',
+            updated_at: '2026-03-04T09:00:00.000Z',
+            expire_at: '2099-03-10T10:00:00.000Z',
+            deleted_at: null,
+            click_count: '42',
+            last_clicked_at: '2026-03-05T06:00:00.000Z',
+            is_active: true,
+            creator_user_id: 7,
+            creator_email: 'user@example.com',
+        });
+
+        const result = await getAdminLinkByIdService(101);
+
+        expect(result.id).toBe(101);
+        expect(result.status).toBe('active');
+        expect(result.meta.isDeleted).toBe(false);
+        expect(result.creator.email).toBe('user@example.com');
+    });
+
+    it('should throw 404 when link id does not exist', async () => {
+        mockedFindAdminLinkById.mockResolvedValue(null);
+
+        await expect(getAdminLinkByIdService(999)).rejects.toMatchObject({
+            statusCode: 404,
+            message: '查無資料',
         });
     });
 });

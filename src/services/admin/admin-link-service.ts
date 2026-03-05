@@ -1,6 +1,7 @@
 import { AppError } from '../../utils/app-error';
 import type { AdminLinksQueryDto } from '../../schemas/admin-schema';
 import {
+    findAdminLinkById,
     listAdminLinks,
     type AdminLinksStatusFilter,
     type ListAdminLinksQuery,
@@ -34,6 +35,31 @@ interface AdminLinksListResult {
         limit: number;
         total: number;
         totalPages: number;
+    };
+}
+
+interface AdminLinkDetailResult {
+    id: number;
+    code: string;
+    shortUrl: string;
+    longUrl: string;
+    targetDomain: string;
+    status: LinkStatus;
+    createdAt: string;
+    updatedAt: string;
+    expireAt: string;
+    deletedAt: string | null;
+    clickCount: number;
+    lastClickedAt: string | null;
+    creator: {
+        userId: number | null;
+        email: string | null;
+    };
+    meta: {
+        isExpired: boolean;
+        isDeleted: boolean;
+        canDisable: boolean;
+        canRestore: boolean;
     };
 }
 
@@ -161,6 +187,50 @@ export const getAdminLinksService = async (
             },
         };
     } catch (error) {
+        throw wrapServiceError(error);
+    }
+};
+
+export const getAdminLinkByIdService = async (id: number): Promise<AdminLinkDetailResult> => {
+    try {
+        const row = await findAdminLinkById(id);
+        if (!row || !row.code) {
+            throw new AppError(404, '查無資料');
+        }
+
+        const shortUrl = new URL(`/${row.code}`, SHORT_BASE_URL).toString();
+        const status = resolveLinkStatus(row.deleted_at, row.expire_at, row.is_active);
+        const isDeleted = row.deleted_at !== null;
+        const isExpired = !isDeleted && row.is_active && new Date(row.expire_at).getTime() <= Date.now();
+
+        return {
+            id: row.id,
+            code: row.code,
+            shortUrl,
+            longUrl: row.long_url,
+            targetDomain: resolveTargetDomain(row.long_url),
+            status,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            expireAt: row.expire_at,
+            deletedAt: row.deleted_at,
+            clickCount: Number(row.click_count),
+            lastClickedAt: row.last_clicked_at,
+            creator: {
+                userId: row.creator_user_id,
+                email: row.creator_email,
+            },
+            meta: {
+                isExpired,
+                isDeleted,
+                canDisable: status === 'active',
+                canRestore: isDeleted,
+            },
+        };
+    } catch (error) {
+        if (error instanceof AppError && error.statusCode === 404) {
+            throw error;
+        }
         throw wrapServiceError(error);
     }
 };

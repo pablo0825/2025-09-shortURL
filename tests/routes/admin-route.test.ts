@@ -5,11 +5,15 @@ import { invokeRouter } from '../helpers/router-request';
 const getAdminLinks = vi.fn((_req: Request, res: Response) => {
     res.status(200).json({ ok: true });
 });
+const getAdminLinkById = vi.fn((_req: Request, res: Response) => {
+    res.status(200).json({ ok: true });
+});
 
 const passThrough = (_req: Request, _res: Response, next: NextFunction): void => next();
 
 vi.mock('../../src/controllers/admin-link-controllers', () => ({
     getAdminLinks,
+    getAdminLinkById,
 }));
 
 vi.mock('../../src/middlewares/auth/authenticate-tokens', () => ({
@@ -57,6 +61,16 @@ describe('admin-route integration', () => {
 
         expect(response.statusCode).toBe(200);
         expect(getAdminLinks).toHaveBeenCalled();
+    });
+
+    it('should route GET /links/:id to detail controller', async () => {
+        const response = await invokeRouter(router, {
+            method: 'GET',
+            url: '/links/101',
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(getAdminLinkById).toHaveBeenCalled();
     });
 
     it('should stop at authenticate middleware when unauthorized', async () => {

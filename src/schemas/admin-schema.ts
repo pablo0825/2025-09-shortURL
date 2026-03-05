@@ -94,3 +94,5 @@ export const adminLinksQuerySchema = z.object({
 
 export type AdminLinksQueryDto = z.infer<typeof adminLinksQuerySchema>;
 
+export const adminLinkIdParamSchema = z.coerce.number().int().positive();
+
