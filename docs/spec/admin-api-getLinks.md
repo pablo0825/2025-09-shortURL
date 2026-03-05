@@ -50,7 +50,7 @@
 ## Rules (用 EARS 寫)
 - IF request user 缺少 id ，系統應回傳 401，並說明 error message: "未登入"
 - IF request user 缺少 role，系統應回傳 403，並說明 error message: "權限不足"
-- IF user role 不等於 "admin"，系統應回傳 403，並說明 error message: "權限不足"
+- IF user role 不屬於 "admin" | "assistant"，系統應回傳 403，並說明 error message: "權限不足"
 - IF request query 缺少 page, limit, sortBy, sortOrder 其中任一，系統應回傳 400，並說明 error message: "參數格式有誤"
 - IF limit 超過 200，系統應回傳 400，並說明 error message: "參數格式有誤"
 - IF sortBy 不屬於 "created_at" | "updated_at" | "expire_at" | "click_count" | "last_clicked_at"， 系統應回傳 400，並說明 error message: "參數格式有誤"
@@ -58,6 +58,14 @@
 - IF status 不屬於 "active" | "expired" | "disabled" | "deleted"， 系統應回傳 400，並說明 error message: "參數格式有誤"
 - WHEN q 有值，系統應對 shortCode, longUrl, creatorEmail 進行模糊搜尋
 - WHEN status 未傳，系統應回傳所有狀態的 link
+
+## Test Cases
+- 正常搜尋，回傳 200 + 分頁資料
+- q 有值，只回傳符合模糊搜尋的結果
+- status 有值，只回傳對應狀態的 link
+- 未登入，回傳 401
+- role 為 "user"，回傳 403
+- limit 傳 201，回傳 400
 
 ## Notes
 - 資料驗證全部交由 zod 處理
