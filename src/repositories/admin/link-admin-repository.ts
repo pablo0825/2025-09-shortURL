@@ -1,4 +1,5 @@
 import { pool } from '../../db/pool';
+import type { PoolClient } from 'pg';
 
 interface AdminLinksFilterResult {
     whereSql: string;
@@ -57,6 +58,15 @@ export interface AdminLinkDetailRow {
     is_active: boolean;
     creator_user_id: number | null;
     creator_email: string | null;
+}
+
+export interface AdminLinkStateRow {
+    id: number;
+    code: string | null;
+    is_active: boolean;
+    deleted_at: string | null;
+    expire_at: string;
+    updated_at: string;
 }
 
 const buildWhereClause = (input: ListAdminLinksQuery): AdminLinksFilterResult => {
@@ -198,5 +208,41 @@ export const findAdminLinkById = async (id: number): Promise<AdminLinkDetailRow 
     `;
 
     const result = await pool.query<AdminLinkDetailRow>(sql, [id]);
+    return result.rows[0] ?? null;
+};
+
+export const findAdminLinkStateByIdForUpdate = async (
+    client: PoolClient,
+    id: number,
+): Promise<AdminLinkStateRow | null> => {
+    const sql = `
+        SELECT
+            l.id::BIGINT AS id,
+            l.code,
+            l.is_active,
+            l.deleted_at::TEXT AS deleted_at,
+            l.expire_at::TEXT AS expire_at,
+            l.updated_at::TEXT AS updated_at
+        FROM links l
+        WHERE l.id = $1
+        FOR UPDATE
+    `;
+
+    const result = await client.query<AdminLinkStateRow>(sql, [id]);
+    return result.rows[0] ?? null;
+};
+
+export const deactivateAdminLinkById = async (
+    client: PoolClient,
+    id: number,
+): Promise<{ updated_at: string } | null> => {
+    const sql = `
+        UPDATE links
+        SET is_active = FALSE, updated_at = now()
+        WHERE id = $1
+        RETURNING updated_at::TEXT AS updated_at
+    `;
+
+    const result = await client.query<{ updated_at: string }>(sql, [id]);
     return result.rows[0] ?? null;
 };

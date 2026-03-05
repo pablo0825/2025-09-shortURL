@@ -8,12 +8,16 @@ const getAdminLinks = vi.fn((_req: Request, res: Response) => {
 const getAdminLinkById = vi.fn((_req: Request, res: Response) => {
     res.status(200).json({ ok: true });
 });
+const deactivateAdminLinkById = vi.fn((_req: Request, res: Response) => {
+    res.status(200).json({ ok: true });
+});
 
 const passThrough = (_req: Request, _res: Response, next: NextFunction): void => next();
 
 vi.mock('../../src/controllers/admin-link-controllers', () => ({
-    getAdminLinks,
+    deactivateAdminLinkById,
     getAdminLinkById,
+    getAdminLinks,
 }));
 
 vi.mock('../../src/middlewares/auth/authenticate-tokens', () => ({
@@ -73,14 +77,24 @@ describe('admin-route integration', () => {
         expect(getAdminLinkById).toHaveBeenCalled();
     });
 
+    it('should route PATCH /links/:id/deactivate to controller', async () => {
+        const response = await invokeRouter(router, {
+            method: 'PATCH',
+            url: '/links/101/deactivate',
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(deactivateAdminLinkById).toHaveBeenCalled();
+    });
+
     it('should stop at authenticate middleware when unauthorized', async () => {
         const response = await invokeRouter(router, {
-            method: 'GET',
-            url: '/links?page=1&limit=20&sortBy=created_at&sortOrder=desc',
+            method: 'PATCH',
+            url: '/links/101/deactivate',
             headers: { 'x-no-auth': '1' },
         });
 
         expect(response.statusCode).toBe(401);
-        expect(getAdminLinks).not.toHaveBeenCalled();
+        expect(deactivateAdminLinkById).not.toHaveBeenCalled();
     });
 });

@@ -1,7 +1,11 @@
+import type { PoolClient } from 'pg';
+import { pool } from '../../db/pool';
 import { AppError } from '../../utils/app-error';
 import type { AdminLinksQueryDto } from '../../schemas/admin-schema';
 import {
+    deactivateAdminLinkById,
     findAdminLinkById,
+    findAdminLinkStateByIdForUpdate,
     listAdminLinks,
     type AdminLinksStatusFilter,
     type ListAdminLinksQuery,
@@ -63,6 +67,19 @@ interface AdminLinkDetailResult {
     };
 }
 
+interface DeactivateAdminLinkResult {
+    id: number;
+    before: {
+        isActive: boolean;
+        status: LinkStatus;
+    };
+    after: {
+        isActive: false;
+        status: 'disabled';
+    };
+    updatedAt: string;
+}
+
 const resolveLinkStatus = (
     deletedAt: string | null,
     expireAt: string,
@@ -87,13 +104,13 @@ const resolveTargetDomain = (longUrl: string): string => {
     }
 };
 
-const wrapServiceError = (error: unknown): AppError => {
+const wrapServiceError = (context: string, error: unknown): AppError => {
     if (error instanceof AppError) {
-        return new AppError(500, `[adminLinkService.getAdminLinks] ${error.message}`, error.code);
+        return new AppError(error.statusCode, `[${context}] ${error.message}`, error.code);
     }
 
     const message = error instanceof Error ? error.message : String(error);
-    return new AppError(500, `[adminLinkService.getAdminLinks] ${message}`);
+    return new AppError(500, `[${context}] ${message}`);
 };
 
 const resolveStatusFilter = (status: AdminLinksQueryDto['status']): AdminLinksStatusFilter => {
@@ -161,11 +178,7 @@ export const getAdminLinksService = async (
                     shortUrl,
                     longUrl: row.long_url,
                     targetDomain: resolveTargetDomain(row.long_url),
-                    status: resolveLinkStatus(
-                        row.deleted_at,
-                        row.expire_at,
-                        row.is_active,
-                    ),
+                    status: resolveLinkStatus(row.deleted_at, row.expire_at, row.is_active),
                     createdAt: row.created_at,
                     updatedAt: row.updated_at,
                     expireAt: row.expire_at,
@@ -187,7 +200,7 @@ export const getAdminLinksService = async (
             },
         };
     } catch (error) {
-        throw wrapServiceError(error);
+        throw wrapServiceError('adminLinkService.getAdminLinks', error);
     }
 };
 
@@ -231,6 +244,64 @@ export const getAdminLinkByIdService = async (id: number): Promise<AdminLinkDeta
         if (error instanceof AppError && error.statusCode === 404) {
             throw error;
         }
-        throw wrapServiceError(error);
+        throw wrapServiceError('adminLinkService.getAdminLinkById', error);
+    }
+};
+
+export const deactivateAdminLinkByIdService = async (
+    id: number,
+): Promise<DeactivateAdminLinkResult> => {
+    let client: PoolClient | undefined;
+
+    try {
+        client = await pool.connect();
+        await client.query('BEGIN');
+
+        const state = await findAdminLinkStateByIdForUpdate(client, id);
+        if (!state) {
+            throw new AppError(404, '查無資料');
+        }
+
+        if (state.deleted_at !== null) {
+            throw new AppError(409, '連結已刪除，無法停用');
+        }
+
+        if (!state.is_active) {
+            throw new AppError(409, '連結已停用');
+        }
+
+        const updated = await deactivateAdminLinkById(client, id);
+        if (!updated) {
+            throw new AppError(404, '查無資料');
+        }
+
+        await client.query('COMMIT');
+
+        return {
+            id,
+            before: {
+                isActive: state.is_active,
+                status: resolveLinkStatus(state.deleted_at, state.expire_at, state.is_active),
+            },
+            after: {
+                isActive: false,
+                status: 'disabled',
+            },
+            updatedAt: updated.updated_at,
+        };
+    } catch (error) {
+        if (client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                throw wrapServiceError('adminLinkService.deactivateAdminLinkById.rollback', rollbackError);
+            }
+        }
+
+        throw wrapServiceError('adminLinkService.deactivateAdminLinkById', error);
+    } finally {
+        if (client) {
+            client.release();
+        }
     }
 };

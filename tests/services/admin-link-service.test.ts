@@ -1,19 +1,48 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../src/repositories/admin/link-admin-repository', () => ({
-    listAdminLinks: vi.fn(),
+    deactivateAdminLinkById: vi.fn(),
     findAdminLinkById: vi.fn(),
+    findAdminLinkStateByIdForUpdate: vi.fn(),
+    listAdminLinks: vi.fn(),
 }));
 
-import { findAdminLinkById, listAdminLinks } from '../../src/repositories/admin/link-admin-repository';
-import { getAdminLinkByIdService, getAdminLinksService } from '../../src/services/admin/admin-link-service';
+vi.mock('../../src/db/pool', () => ({
+    pool: {
+        connect: vi.fn(),
+    },
+}));
 
+import { pool } from '../../src/db/pool';
+import {
+    deactivateAdminLinkById,
+    findAdminLinkById,
+    findAdminLinkStateByIdForUpdate,
+    listAdminLinks,
+} from '../../src/repositories/admin/link-admin-repository';
+import {
+    deactivateAdminLinkByIdService,
+    getAdminLinkByIdService,
+    getAdminLinksService,
+} from '../../src/services/admin/admin-link-service';
+
+const mockedPool = vi.mocked(pool);
 const mockedListAdminLinks = vi.mocked(listAdminLinks);
 const mockedFindAdminLinkById = vi.mocked(findAdminLinkById);
+const mockedFindAdminLinkStateByIdForUpdate = vi.mocked(findAdminLinkStateByIdForUpdate);
+const mockedDeactivateAdminLinkById = vi.mocked(deactivateAdminLinkById);
+
+const queryMock = vi.fn();
+const releaseMock = vi.fn();
 
 describe('admin-link-service', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        mockedPool.connect.mockResolvedValue({
+            query: queryMock,
+            release: releaseMock,
+        } as never);
+        queryMock.mockResolvedValue(undefined);
     });
 
     it('should map rows to response shape', async () => {
@@ -58,37 +87,6 @@ describe('admin-link-service', () => {
                 },
             }),
         );
-    });
-
-    it('should map disabled status from row state', async () => {
-        mockedListAdminLinks.mockResolvedValue({
-            rows: [
-                {
-                    id: 1,
-                    code: 'd1',
-                    long_url: 'https://example.com',
-                    created_at: '2026-03-03T10:00:00.000Z',
-                    updated_at: '2026-03-03T10:00:00.000Z',
-                    expire_at: '2099-03-10T10:00:00.000Z',
-                    deleted_at: null,
-                    click_count: '0',
-                    last_clicked_at: null,
-                    is_active: false,
-                    creator_user_id: null,
-                    creator_email: null,
-                },
-            ],
-            total: 1,
-        });
-
-        const result = await getAdminLinksService({
-            page: 1,
-            limit: 20,
-            sortBy: 'updated_at',
-            sortOrder: 'asc',
-        });
-
-        expect(result.data[0]?.status).toBe('disabled');
     });
 
     it('should convert active status to repository filter', async () => {
@@ -162,5 +160,60 @@ describe('admin-link-service', () => {
             statusCode: 404,
             message: '查無資料',
         });
+    });
+
+    it('should deactivate link and return before/after', async () => {
+        mockedFindAdminLinkStateByIdForUpdate.mockResolvedValue({
+            id: 101,
+            code: 'abc123',
+            is_active: true,
+            deleted_at: null,
+            expire_at: '2099-03-10T10:00:00.000Z',
+            updated_at: '2026-03-03T10:00:00.000Z',
+        });
+        mockedDeactivateAdminLinkById.mockResolvedValue({
+            updated_at: '2026-03-06T09:30:00.000Z',
+        });
+
+        const result = await deactivateAdminLinkByIdService(101);
+
+        expect(result.before.isActive).toBe(true);
+        expect(result.after.isActive).toBe(false);
+        expect(result.after.status).toBe('disabled');
+        expect(queryMock).toHaveBeenCalledWith('COMMIT');
+    });
+
+    it('should throw 409 when link is deleted in deactivate', async () => {
+        mockedFindAdminLinkStateByIdForUpdate.mockResolvedValue({
+            id: 101,
+            code: 'abc123',
+            is_active: true,
+            deleted_at: '2026-03-06T09:00:00.000Z',
+            expire_at: '2099-03-10T10:00:00.000Z',
+            updated_at: '2026-03-03T10:00:00.000Z',
+        });
+
+        await expect(deactivateAdminLinkByIdService(101)).rejects.toMatchObject({
+            statusCode: 409,
+        });
+        await expect(deactivateAdminLinkByIdService(101)).rejects.toThrow('連結已刪除，無法停用');
+        expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
+    });
+
+    it('should throw 409 when link is already disabled in deactivate', async () => {
+        mockedFindAdminLinkStateByIdForUpdate.mockResolvedValue({
+            id: 101,
+            code: 'abc123',
+            is_active: false,
+            deleted_at: null,
+            expire_at: '2099-03-10T10:00:00.000Z',
+            updated_at: '2026-03-03T10:00:00.000Z',
+        });
+
+        await expect(deactivateAdminLinkByIdService(101)).rejects.toMatchObject({
+            statusCode: 409,
+        });
+        await expect(deactivateAdminLinkByIdService(101)).rejects.toThrow('連結已停用');
+        expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
     });
 });
