@@ -31,6 +31,7 @@ async function bootstrap(): Promise<void> {
         const { linkRouter } = await import('./routes/link-route');
         const { authRouter } = await import('./routes/auth-route');
         const { userRouter } = await import('./routes/user-route');
+        const { adminRouter } = await import('./routes/admin-route');
 
         logger.info('[3/4] 載入 RBAC 權限...');
         await loadRbacFromDb();
@@ -42,6 +43,7 @@ async function bootstrap(): Promise<void> {
             linkRouter,
             authRouter,
             userRouter,
+            adminRouter,
         });
 
         server = app.listen(port, () => {

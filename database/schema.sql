@@ -1,5 +1,6 @@
 -- URL Shortener Backend - Database Schema
--- Updated: 2026-02-21
+-- Updated: 2026-03-05
+-- Full executable snapshot
 
 BEGIN;
 
@@ -102,11 +103,11 @@ CREATE TABLE IF NOT EXISTS refresh_token (
     user_agent TEXT,
     ip_address INET,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ NOT NULL,
     revoked_at TIMESTAMPTZ,
     device_info TEXT,
     last_used_at TIMESTAMPTZ,
-    CHECK (expires_at IS NULL OR expires_at >= created_at)
+    CHECK (expires_at >= created_at)
 );
 
 CREATE TABLE IF NOT EXISTS role (
@@ -169,10 +170,40 @@ CREATE TABLE IF NOT EXISTS links (
     code VARCHAR(16),
     long_url TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ,
     expire_at TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '7 days'),
     creator_ip INET,
+    creator_user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    CHECK (expire_at >= created_at)
+    click_count BIGINT NOT NULL DEFAULT 0,
+    last_clicked_at TIMESTAMPTZ,
+    CHECK (expire_at >= created_at),
+    CONSTRAINT links_click_count_non_negative CHECK (click_count >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS link_logs (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    link_id BIGINT NOT NULL REFERENCES links(id) ON DELETE CASCADE,
+    log_info JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS link_click_events (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    link_id BIGINT NOT NULL REFERENCES links(id) ON DELETE CASCADE,
+    clicked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    visitor_ip INET,
+    referer TEXT,
+    user_agent TEXT,
+    device_type VARCHAR(20),
+    country_code CHAR(2),
+    CONSTRAINT chk_link_click_events_device_type CHECK (
+        device_type IS NULL OR device_type IN ('desktop', 'mobile', 'tablet', 'bot', 'unknown')
+    ),
+    CONSTRAINT chk_link_click_events_country_code CHECK (
+        country_code IS NULL OR country_code ~ '^[A-Z]{2}$'
+    )
 );
 
 CREATE TABLE IF NOT EXISTS link_task (
@@ -235,8 +266,19 @@ CREATE INDEX IF NOT EXISTS idx_user_log_user_created_at ON user_log(user_id, cre
 CREATE INDEX IF NOT EXISTS idx_user_log_action_user_created_at ON user_log(action, user_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_links_expire_at ON links(expire_at);
+CREATE INDEX IF NOT EXISTS idx_links_is_active ON links(is_active);
 CREATE INDEX IF NOT EXISTS idx_links_active_expire ON links(is_active, expire_at);
+CREATE INDEX IF NOT EXISTS idx_links_creator_user_id ON links(creator_user_id);
+CREATE INDEX IF NOT EXISTS idx_links_click_count ON links(click_count DESC);
+CREATE INDEX IF NOT EXISTS idx_links_last_clicked_at ON links(last_clicked_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS links_code_uidx ON links(code) WHERE code IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_link_logs_link_id ON link_logs(link_id);
+CREATE INDEX IF NOT EXISTS idx_link_logs_created_at ON link_logs(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_link_click_events_clicked_at ON link_click_events(clicked_at DESC);
+CREATE INDEX IF NOT EXISTS idx_link_click_events_link_id_clicked_at
+    ON link_click_events(link_id, clicked_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_link_task_available ON link_task(status, available_at);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_link_task_dedup

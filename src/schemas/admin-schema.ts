@@ -81,3 +81,16 @@ export const assignUserRoleSchema = z.object({
 
 export type AssignUserRoleDto = z.infer<typeof assignUserRoleSchema>;
 
+export const adminLinkStatusSchema = z.enum(['active', 'expired', 'disabled', 'deleted']);
+
+export const adminLinksQuerySchema = z.object({
+    page: z.coerce.number().int().min(1),
+    limit: z.coerce.number().int().min(1).max(200),
+    sortBy: z.enum(['created_at', 'updated_at', 'expire_at', 'click_count', 'last_clicked_at']),
+    sortOrder: z.enum(['asc', 'desc']),
+    q: z.string().trim().min(1).optional(),
+    status: adminLinkStatusSchema.optional(),
+});
+
+export type AdminLinksQueryDto = z.infer<typeof adminLinksQuerySchema>;
+

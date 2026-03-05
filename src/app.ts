@@ -12,6 +12,7 @@ interface AppRouters {
     authRouter: Router;
     linkRouter: Router;
     userRouter: Router;
+    adminRouter: Router;
 }
 
 // 把環境變數 CORS_ORIGINS 解析成可用網址的陣列
@@ -122,6 +123,7 @@ export const buildApp = (routers: AppRouters): ReturnType<typeof express> => {
     app.use('/api/link', routers.linkRouter);
     app.use('/api/auth', routers.authRouter);
     app.use('/api/user', routers.userRouter);
+    app.use('/api/admin', routers.adminRouter);
 
     app.get('/:code', cacheShortUrl, redirectToLongUrl);
 
