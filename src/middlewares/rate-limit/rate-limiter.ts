@@ -9,7 +9,7 @@ import {
     resetPasswordLimiter,
     initAuthRateLimiters,
 } from './auth-rate-limiter';
-import { createLinkLimiter, initLinkRateLimiters } from './link-rate-limiter';
+import { createLinkLimiter, initLinkRateLimiters, redirectLinkLimiter } from './link-rate-limiter';
 import {
     updateAvatarLimiter,
     getMyProfileLimiter,
@@ -48,6 +48,7 @@ export function getRateLimiters() {
         !generalApiLimiter ||
         !resetPasswordLimiter ||
         !createLinkLimiter ||
+        !redirectLinkLimiter ||
         !updateAvatarLimiter ||
         !getMyProfileLimiter ||
         !updateMyProfileLimiter ||
@@ -74,6 +75,7 @@ export function getRateLimiters() {
         generalApiLimiter,
         resetPasswordLimiter,
         createLinkLimiter,
+        redirectLinkLimiter,
         updateAvatarLimiter,
         getMyProfileLimiter,
         updateMyProfileLimiter,

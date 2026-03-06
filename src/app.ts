@@ -6,6 +6,7 @@ import { pool } from './db/pool';
 import { redirectToLongUrl } from './controllers/link-controllers';
 import { errorHandler, notFoundHandler } from './middlewares/error/error-handler';
 import { cacheShortUrl } from './middlewares/redirect/cache-short-url';
+import { getRateLimiters } from './middlewares/rate-limit/rate-limiter';
 import { logger } from './lib/logger';
 
 interface AppRouters {
@@ -89,6 +90,7 @@ const attachCors = (app: ReturnType<typeof express>): void => {
 
 export const buildApp = (routers: AppRouters): ReturnType<typeof express> => {
     const app = express();
+    const { redirectLinkLimiter } = getRateLimiters();
 
     app.use(helmet()); // 加上安全性的 http 標頭
     app.use(express.json()); // 讓 api 可以解析 json request body
@@ -125,7 +127,7 @@ export const buildApp = (routers: AppRouters): ReturnType<typeof express> => {
     app.use('/api/user', routers.userRouter);
     app.use('/api/admin', routers.adminRouter);
 
-    app.get('/:code', cacheShortUrl, redirectToLongUrl);
+    app.get('/:code', redirectLinkLimiter, cacheShortUrl, redirectToLongUrl);
 
     // 處理前面沒處理到的錯誤
     // 用來處理找不到路由的情況，返回404
