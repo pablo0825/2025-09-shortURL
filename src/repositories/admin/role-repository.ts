@@ -37,8 +37,30 @@ export interface PermissionLookupRow {
     type: string;
 }
 
+export interface RbacRolePermissionRow {
+    role_id: number;
+    role_type: string;
+    module: string | null;
+    type: string | null;
+}
+
 export const findAllRoles = async (): Promise<AdminRoleRow[]> => {
     const result = await pool.query<AdminRoleRow>('SELECT id, type FROM role ORDER BY id DESC');
+    return result.rows;
+};
+
+export const findRolesWithPermissionsForRbac = async (): Promise<RbacRolePermissionRow[]> => {
+    const sql = `SELECT
+        r.id AS role_id,
+        r.type AS role_type,
+        p.module,
+        p.type
+    FROM role r
+    LEFT JOIN role_permissions rp ON rp.role_id = r.id
+    LEFT JOIN permissions p ON p.id = rp.permissions_id
+    ORDER BY r.id ASC, p.module ASC NULLS LAST, p.type ASC NULLS LAST, p.id ASC NULLS LAST`;
+
+    const result = await pool.query<RbacRolePermissionRow>(sql);
     return result.rows;
 };
 

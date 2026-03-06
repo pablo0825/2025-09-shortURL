@@ -230,7 +230,7 @@ auth api 大多已經完成，如下，剩下驗證email的api，等完成user, 
 - [x] 更新個人頭像 updateMyAvatar 
 - [x] 刪除個人頭像 deleteMyAvatar
 - [x] 更新密碼 changeMyPassword 用post 
-- [x]設定2fa驗證 setup2fa
+- [x] 設定2fa驗證 setup2fa
 - [x] 驗證2fa驗證 verify2fa
 - [x] 停用2fa驗證 disable2fa
 - [x] 刪除帳號 softDeleteMyAccount
@@ -250,10 +250,18 @@ auth api 大多已經完成，如下，剩下驗證email的api，等完成user, 
 - [x] 分配角色給使用者 assignRolesToUser
 - [x] 查詢所有link getAllLink
 - [x] 查詢指定link getLink
-- [ ] 停用指定link 
+- [X] 停用指定link 
 - [ ] 刪除指定link
 - [ ] 恢復指定link
 - [ ] 查詢log 
 - [ ] 查詢使用者統計資料
 - [ ] 查詢link統計資料
 - [ ] 
+
+redis故障時，系統行為不明，是要採用 fail-open 還是 fail-closed？
+權限一致性，文件說權限變更時要 delete and re-initialize cache。但沒定義是同步刷新、版本號切換、還是事件驅動失效。
+
+RBAC cache miss policy
+Redis unavailable policy
+permission versioning / invalidation strategy
+whether authz should fail closed by default
