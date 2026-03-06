@@ -53,7 +53,10 @@ npm install
 │   ├── types/           # Custom TypeScript types / interfaces
 │   ├── lib/             # Infrastructure wrappers (third-party service wrappers, no business logic, e.g. cache.ts, logger.ts)
 │   ├── utils/           # General utility functions (no business logic)
-│   └── app.ts           # Express application entry point
+│   ├── rbac/            # Permission initialization scripts (auto-executed on startup, seeds roles and permissions)
+│   ├── enum/            # Shared enum constants (e.g. HttpMethod, HttpStatus)
+│   ├── app.ts           # Express application entry (creates app, registers middleware and routes)
+│   └── index.ts         # Server initialization entry (starts HTTP server, connects DB and Redis, runs rbac, etc.)
 ├── tests/               # Test files (mirroring src/ structure)
 ├── specs/               # Project background docs (for developers only, Agent does not need to read)
 ├── database/
@@ -62,13 +65,14 @@ npm install
 ├── docker-compose.yml   # Docker container orchestration config
 ├── tsconfig.json
 ├── package.json
-├── package-lock.json
 └── AGENTS.md
 ```
 
 > When adding new files, follow the directory structure above. Do not create new folders arbitrarily in the root directory.
 
 > File placement guideline: Put encapsulations with external dependencies or I/O operations (e.g., Redis, logging libraries) in `src/lib/`; put pure computational functions with no external dependencies in `src/utils/`.
+
+> `enum/` vs `types/` guideline: Put shared constants that have actual values at runtime (e.g., `HttpMethod`, `AuthEvent`) in `src/enum/`; put type definitions that only exist at compile time (e.g., `interface`, `type alias`) in `src/types/`.
 
 ---
 
@@ -90,6 +94,12 @@ Route → Controller → Service → Repository → Database
 
 > **Redis cache** is encapsulated in `src/lib/cache.ts` as an infrastructure wrapper with no business logic. It is called by the Service layer when needed and does not belong to the Repository layer.
 
+> **RBAC permission control** is implemented in-house without third-party packages. On startup, `src/index.ts` triggers the initialization scripts in `src/rbac/`, which read role and permission data from the database via the `src/repositories/` layer and write them into Redis cache via `src/lib/cache.ts`. At runtime, permission checks always read from Redis to avoid repeated database queries.
+
+> RBAC permission middleware may call `src/lib/cache.ts` directly to read permission data, without going through the Service layer. Middleware is a cross-cutting concern, and this is a justified architectural exception.
+
+> When `src/rbac/` scripts need to access the database, they must do so through the `src/repositories/` layer. Calling `src/db/pool.ts` directly is not allowed.
+
 ---
 
 ## Development Standards
@@ -97,7 +107,7 @@ Route → Controller → Service → Repository → Database
 ### Language & Style
 - Always use **TypeScript**. Adding `.js` files under `src/` is not allowed.
 - Use **ES Modules** (`import` / `export`). Do not use `require`.
-- Use **4-space indentation** and **single quotes** `'` for strings.
+- Use **2-space indentation** and **single quotes** `'` for strings.
 - Each function should have a single responsibility and ideally not exceed 50 lines.
 - Always use **`async/await`**. Avoid `.then()` chains.
 
@@ -148,6 +158,32 @@ type UrlStatus = string                               // should be explicitly de
 - Classes / Interfaces / Types: `PascalCase` (e.g., `UrlRecord`, `CreateUrlDto`)
 - Constants: `UPPER_SNAKE_CASE` (e.g., `MAX_RETRY_COUNT`, `DEFAULT_TTL`)
 
+### Enums
+
+- Constants that have actual values at runtime and are shared across modules must be defined as `enum` and placed in the `src/enum/` directory.
+- Type definitions that only exist at compile time (`interface`, `type alias`) go in `src/types/`, not `src/enum/`.
+
+```ts
+// ✅ Correct: has runtime value → src/enum/
+export enum HttpMethod {
+  GET = 'GET',
+  POST = 'POST',
+}
+
+export enum AuthEvent {
+  FORGOT_PASSWORD = 'FORGOT_PASSWORD',
+  RESET_PASSWORD = 'RESET_PASSWORD',
+}
+
+// ✅ Correct: type only → src/types/
+export interface UrlRecord {
+  id: number;
+  shortCode: string;
+}
+
+// ❌ Forbidden: do not put enums in types/, or interfaces in enum/
+```
+
 ### Data Validation (Zod)
 - All external input (request body, query params, environment variables) must be validated using **Zod schemas**.
 - Schema definitions go in the `src/schemas/` directory.
@@ -190,15 +226,16 @@ try {
 - All Redis operations must be encapsulated in `src/lib/cache.ts`. Calling the Redis client directly elsewhere is not allowed.
 - Cache key naming format: `<module>:<identifier>` (e.g., `url:abc123`).
 - **TTL must always be specified** when setting a cache entry. Permanent caching is not allowed.
-- Follow the **Cache-Aside** pattern: query Redis first → query the database only on a Cache Miss → write the result back to Redis. If the query result is empty (data does not exist), do not write to Redis to avoid caching invalid data.
+- RBAC permission data must have a TTL (24 hours recommended). When permission data changes, the corresponding Redis cache must be deleted and re-initialized.
+- General business queries follow the **Cache-Aside** pattern: query Redis first → query the database only on a Cache Miss → write the result back to Redis. If the query result is empty (data does not exist), do not write to Redis to avoid caching invalid data. RBAC permission data uses an active write pattern (initialized on startup) and does not follow this pattern.
 - When performing update or delete operations, always follow the principle of **updating/deleting the database first, then deleting/updating the Redis cache**, to ensure eventual data consistency.
 
 ### Error Handling
 - **Not every layer needs a `try/catch`.** Each layer's error handling responsibility is as follows:
-    - **Repository layer**: No need to catch. Let the original error propagate up naturally.
-    - **Service layer**: Catch the error, append operation context to the error message (e.g., `[urlService.createShortUrl] original error message`), then re-throw. This makes it easier to trace the error source during debugging.
-    - **Controller layer**: Do not handle errors. Let them propagate up to the error middleware.
-    - **Error middleware**: Receives all errors, logs them, and returns a standardized error response.
+  - **Repository layer**: No need to catch. Let the original error propagate up naturally.
+  - **Service layer**: Catch the error, append operation context to the error message (e.g., `[urlService.createShortUrl] original error message`), then re-throw. This makes it easier to trace the error source during debugging.
+  - **Controller layer**: Do not handle errors. Let them propagate up to the error middleware.
+  - **Error middleware**: Receives all errors, logs them, and returns a standardized error response.
 - Silent catches (`catch (e) {}`) are not allowed. Any caught error must be re-thrown and must not be swallowed.
 - **Error logging is the sole responsibility of the error middleware.** Layers must not log errors individually to avoid the same error being recorded multiple times.
 
@@ -222,14 +259,17 @@ try {
 - Each test case must clearly describe the scenario being tested. Use `describe` for grouping and `it` for individual cases.
 - Tests must cover both the happy path and error paths.
 - **Unit tests and service-layer tests**: Must not connect to a real database or Redis. Always use mocks.
-- **Integration tests (API routes)**: May connect to a dedicated test database (e.g., testcontainers or a separate test DB). The production database must never be used.
+- **Integration tests (API routes)**: May connect to a dedicated test database (e.g., testcontainers or a separate test DB). The production database must never be used. The test environment must also have a dedicated Redis instance with RBAC permission data initialized before tests run, or mock the RBAC middleware, to prevent all route tests from failing due to permission validation errors.
 
 ### Coverage Requirements
 - Follow **TDD (Test-Driven Development)**: write tests before implementing features.
 - All new features must have corresponding tests.
 - API routes must have **integration tests**.
+- The Service layer (`src/services/`) must have **unit tests**. Mock `src/repositories/` and `src/lib/cache.ts` when testing.
 - Utility functions (`src/utils/`) must have **unit tests**.
 - Infrastructure wrappers (`src/lib/`) must have **unit tests**.
+- Permission initialization scripts (`src/rbac/`) must have **unit tests**. Mock `src/repositories/` and `src/lib/cache.ts` when testing.
+- The Repository layer (`src/repositories/`) is recommended to be covered indirectly via API route integration tests. If independent validation of complex SQL logic is needed, integration tests may be written for that specific repository using a dedicated test database — do not use mocks.
 - Minimum test coverage: **70%**. Submissions below this threshold are not allowed.
 
 ### Testing Principles
@@ -282,9 +322,8 @@ describe('url-service', () => {
 - Always use parameterized queries (`$1, $2, ...`).
 - All user input must be validated (following the Zod validation rules in the development standards).
 - The `originalUrl` scheme must be restricted to `http://` or `https://` (enforced in the Zod schema).
-- All protected API routes must have authentication/authorization middleware.
-- Public endpoints (e.g., register/login/forgot-password/reset-password) may be unauthenticated by design.
-- All protected API routes must apply **rate limit middleware** (using `express-rate-limit`) to prevent abuse and brute-force attacks.
+- API routes must have authentication/authorization middleware. Publicly accessible routes (e.g., the short URL redirect endpoint) are exempt from this requirement and must be explicitly marked as public routes at the route layer.
+- All API routes must apply **rate limit middleware** (using `express-rate-limit`) to prevent abuse and brute-force attacks.
 - Use **helmet** to manage HTTP security headers, initialized once in `src/app.ts`.
 - CORS configuration must be managed centrally in `src/app.ts`. Setting it on individual routes is not allowed.
 
@@ -336,7 +375,8 @@ npm run coverage
 - **Must not execute SQL to modify the database schema directly.** Instead, provide a complete SQL migration script (e.g., `ALTER TABLE`, `CREATE INDEX`) for the developer to review and execute manually. Scripts must consider backward compatibility — new columns must allow NULL or have a default value to avoid breaking existing data.
 
 ### ⚠️ Requires Confirmation Before Acting
-- Before modifying core entry files such as `src/app.ts`, explain the reason for the change.
+- Before modifying core entry files such as `src/app.ts` or `src/index.ts`, explain the reason for the change.
+- Before modifying the `src/rbac/` permission initialization scripts, explain the reason for the change. This directory directly affects the global permission data loaded at service startup.
 - Before refactoring across multiple modules, list the affected scope first.
 - When adding or modifying a Zod schema, verify whether related type derivations need to be updated as well.
 

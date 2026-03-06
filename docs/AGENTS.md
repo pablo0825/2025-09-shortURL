@@ -52,7 +52,10 @@ npm install
 │   ├── types/           # 自訂 TypeScript 型別 / interface
 │   ├── lib/             # 基礎設施封裝（第三方服務 wrapper，不含業務邏輯，如 cache.ts、logger.ts）
 │   ├── utils/           # 通用工具函式（不含業務邏輯）
-│   └── app.ts           # Express 應用程式入口
+│   ├── rbac/            # 權限初始化腳本（啟動時自動執行，預載角色與權限資料）
+│   ├── enum/            # 公用列舉常數（如 HttpMethod、HttpStatus 等）
+│   ├── app.ts           # Express 應用程式入口（建立 app、註冊 middleware 與路由）
+│   └── index.ts         # 伺服器初始化入口（啟動 HTTP server、連線 DB、Redis，執行 rbac 等）
 ├── tests/               # 測試檔案（對應 src/ 結構）
 ├── specs/               # 專案方向與背景文件（供開發者參考，Agent 不需讀取）
 ├── database/
@@ -67,6 +70,8 @@ npm install
 > 若新增檔案，請遵循上述目錄結構放置，不要在根目錄隨意建立新資料夾。
 
 > 檔案放置判斷原則：有外部依賴或 I/O 操作（如 Redis、logging 套件）的封裝放 `src/lib/`；純運算、不依賴外部服務的工具函式放 `src/utils/`。
+
+> `enum/` 與 `types/` 的判斷原則：在執行期有實際值、跨模組共用的固定常數（如 `HttpMethod`、`AuthEvent`）放 `src/enum/`；只在編譯期存在的型別定義（如 `interface`、`type alias`）放 `src/types/`。
 
 ---
 
@@ -87,6 +92,12 @@ Route → Controller → Service → Repository → Database
 | **Database** | PostgreSQL 資料庫，透過 `src/db/pool.ts` 連線 |
 
 > **Redis 快取**統一封裝在 `src/lib/cache.ts`，職責為基礎設施封裝，不含業務邏輯。由 Service 層在需要時呼叫，不屬於 Repository 層。
+
+> **RBAC 權限控制**為自行實作，不依賴第三方套件。啟動時由 `src/index.ts` 觸發 `src/rbac/` 的初始化腳本，透過 `src/repositories/` 層從資料庫讀取角色與權限資料，並透過 `src/lib/cache.ts` 寫入 Redis 快取。執行期的權限驗證統一從 Redis 取得，不重複查詢資料庫。
+
+> RBAC 權限驗證 middleware 可直接呼叫 `src/lib/cache.ts` 讀取權限資料，不需透過 Service 層。Middleware 屬於橫切關注點（cross-cutting concern），這是合理的架構例外。
+
+> `src/rbac/` 腳本操作資料庫時，必須透過 `src/repositories/` 層，不得直接呼叫 `src/db/pool.ts`。
 
 ---
 
@@ -146,6 +157,32 @@ type UrlStatus = string                               // 應明確定義為聯�
 - 類別 / Interface / Type：`PascalCase`（如 `UrlRecord`、`CreateUrlDto`）
 - 常數：`UPPER_SNAKE_CASE`（如 `MAX_RETRY_COUNT`、`DEFAULT_TTL`）
 
+### 列舉（Enum）
+
+- 在執行期有實際值、跨模組共用的固定常數一律定義為 `enum`，統一放在 `src/enum/` 目錄。
+- 只在編譯期存在的型別定義（`interface`、`type alias`）放 `src/types/`，不放 `src/enum/`。
+
+```ts
+// ✅ 正確：執行期有值 → src/enum/
+export enum HttpMethod {
+  GET = 'GET',
+  POST = 'POST',
+}
+
+export enum AuthEvent {
+  FORGOT_PASSWORD = 'FORGOT_PASSWORD',
+  RESET_PASSWORD = 'RESET_PASSWORD',
+}
+
+// ✅ 正確：只有型別 → src/types/
+export interface UrlRecord {
+  id: number;
+  shortCode: string;
+}
+
+// ❌ 禁止：enum 不放 types/，interface 不放 enum/
+```
+
 ### 資料驗證（Zod）
 - 所有外部輸入（Request body、query params、環境變數）一律使用 **Zod schema** 驗證。
 - Schema 定義統一放在 `src/schemas/` 目錄。
@@ -188,7 +225,8 @@ try {
 - Redis 操作統一封裝在 `src/lib/cache.ts`，其他地方不得直接呼叫 Redis client。
 - 快取 key 命名格式：`<模組>:<識別碼>`（例如 `url:abc123`）。
 - 設定快取時**必須指定 TTL**，不允許永久快取。
-- 採用 **Cache-Aside** 模式：先查 Redis → Cache Miss 時才查詢資料庫 → 查詢結果寫回 Redis。若查詢結果為空（資料不存在），不寫入 Redis，避免快取無效資料。
+- RBAC 權限資料必須設定 TTL（建議 24 小時）。權限資料異動時，應主動刪除對應的 Redis 快取並重新初始化。
+- 一般業務查詢採用 **Cache-Aside** 模式：先查 Redis → Cache Miss 時才查詢資料庫 → 查詢結果寫回 Redis。若查詢結果為空（資料不存在），不寫入 Redis，避免快取無效資料。RBAC 權限資料採用主動寫入模式（啟動時初始化），不適用此模式。
 - 執行更新或刪除操作時，必須遵循**先更新／刪除資料庫，再刪除／更新 Redis 快取**的原則，以確保資料最終一致性。
 
 ### 錯誤處理
@@ -220,14 +258,17 @@ try {
 - 每個測試案例描述需清楚說明測試情境，使用 `describe` 分組、`it` 描述單一案例。
 - 測試應涵蓋正常情境（happy path）與異常情境（error path）。
 - **單元測試與 service 層測試**：不得連接真實資料庫或 Redis，一律使用 mock 取代。
-- **整合測試（API 路由）**：允許連接測試專用的獨立資料庫（如 testcontainers 或獨立的 test DB），不得使用正式環境資料庫。
+- **整合測試（API 路由）**：允許連接測試專用的獨立資料庫（如 testcontainers 或獨立的 test DB），不得使用正式環境資料庫。測試環境須同時準備測試用的 Redis，並在測試啟動前完成 RBAC 權限資料的初始化，或對 RBAC middleware 進行 mock，避免因權限驗證失敗導致所有路由測試無法通過。
 
 ### 測試涵蓋要求
 - 採用 **TDD（測試驅動開發）** 方式，先寫測試再實作功能。
 - 所有新功能都必須有對應的測試。
 - API 路由必須有**整合測試**。
+- Service 層（`src/services/`）必須有**單元測試**，測試時須 mock `src/repositories/` 與 `src/lib/cache.ts`。
 - 工具函式（`src/utils/`）必須有**單元測試**。
 - 基礎設施封裝（`src/lib/`）必須有**單元測試**。
+- 權限初始化腳本（`src/rbac/`）必須有**單元測試**，測試時須 mock `src/repositories/` 與 `src/lib/cache.ts`。
+- Repository 層（`src/repositories/`）建議透過 API 路由整合測試間接覆蓋。若需要獨立驗證複雜 SQL 邏輯，可針對該 repository 撰寫整合測試，連接測試專用資料庫，不使用 mock。
 - 最低測試覆蓋率：**70%**，低於此標準不得提交。
 
 ### 測試原則
@@ -280,7 +321,7 @@ describe('url-service', () => {
 - 使用參數化查詢（`$1, $2, ...`）。
 - 所有使用者輸入都要驗證（遵循開發規範中的 Zod 驗證規則）。
 - `originalUrl` 的 scheme 必須限定為 `http://` 或 `https://`（在 Zod schema 中強制驗證）。
-- API 路由必須有權限驗證中介軟體。
+- API 路由必須有權限驗證中介軟體。公開存取的路由（如短網址跳轉端點）不在此限，應在路由層明確標註為公開路由。
 - 所有 API 路由必須套用 **rate limit middleware**（使用 `express-rate-limit`），防止濫用與暴力攻擊。
 - 使用 **helmet** 管理 HTTP 安全 headers，統一在 `src/app.ts` 中初始化。
 - CORS 設定統一在 `src/app.ts` 中管理，不得在個別路由自行設定。
@@ -333,7 +374,8 @@ npm run coverage
 - **不得直接執行 SQL 修改資料庫結構**，應提供完整的 SQL 異動腳本（如 `ALTER TABLE`、`CREATE INDEX` 等）給開發者審核後手動執行。腳本應考慮向下相容性，新增欄位時須允許 NULL 或提供預設值，避免破壞現有資料。
 
 ### ⚠️ 操作前需確認
-- 修改 `src/app.ts` 等核心入口檔案前，請先說明變更理由。
+- 修改 `src/app.ts`、`src/index.ts` 等核心入口檔案前，請先說明變更理由。
+- 修改 `src/rbac/` 權限初始化腳本前，請先說明變更理由，此目錄直接影響服務啟動時的全域權限資料。
 - 重構涉及多個模組時，請先列出影響範圍再動手。
 - 新增或異動 Zod schema 時，確認相關型別推導是否需要一併更新。
 
