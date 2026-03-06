@@ -78,7 +78,7 @@ npm install
 
 ## Layered Architecture
 
-Strictly follow the order below. Cross-layer calls are not allowed:
+Strictly follow the order below. Cross-layer calls are not allowed. Any exceptions due to special architectural requirements must be explicitly documented in this file.
 
 ```
 Route → Controller → Service → Repository → Database
@@ -379,6 +379,12 @@ npm run coverage
 - Before modifying the `src/rbac/` permission initialization scripts, explain the reason for the change. This directory directly affects the global permission data loaded at service startup.
 - Before refactoring across multiple modules, list the affected scope first.
 - When adding or modifying a Zod schema, verify whether related type derivations need to be updated as well.
+
+### 💬 Communication & Thinking Style
+
+- Before starting any non-trivial task, state your understanding of the requirements and your execution plan before acting.
+- When human decisions are required (e.g., architectural choices, unclear requirements, items that need confirmation before acting), use a **one-question-at-a-time** format: ask one question, provide options with the reasoning behind each, and wait for confirmation before proceeding.
+- When answering or analyzing a problem, adjust the depth of explanation based on complexity: give a concise summary for simple tasks, and show your thinking process for complex tasks or those involving architectural decisions.
 
 ---
 
