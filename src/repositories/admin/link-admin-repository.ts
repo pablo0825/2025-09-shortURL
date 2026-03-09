@@ -246,3 +246,36 @@ export const deactivateAdminLinkById = async (
     const result = await client.query<{ updated_at: string }>(sql, [id]);
     return result.rows[0] ?? null;
 };
+
+export const softDeleteAdminLinkById = async (
+    client: PoolClient,
+    id: number,
+): Promise<{ updated_at: string; deleted_at: string } | null> => {
+    const sql = `
+        UPDATE links
+        SET deleted_at = now(), is_active = FALSE, updated_at = now()
+        WHERE id = $1
+        RETURNING updated_at::TEXT AS updated_at, deleted_at::TEXT AS deleted_at
+    `;
+
+    const result = await client.query<{ updated_at: string; deleted_at: string }>(sql, [id]);
+    return result.rows[0] ?? null;
+};
+
+export const restoreAdminLinkById = async (
+    client: PoolClient,
+    id: number,
+): Promise<{ updated_at: string; deleted_at: string | null; is_active: boolean } | null> => {
+    const sql = `
+        UPDATE links
+        SET deleted_at = NULL, is_active = TRUE, updated_at = now()
+        WHERE id = $1
+        RETURNING updated_at::TEXT AS updated_at, deleted_at::TEXT AS deleted_at, is_active
+    `;
+
+    const result = await client.query<{ updated_at: string; deleted_at: string | null; is_active: boolean }>(
+        sql,
+        [id],
+    );
+    return result.rows[0] ?? null;
+};

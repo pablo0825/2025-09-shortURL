@@ -2,25 +2,32 @@ import { type NextFunction, type Request, type Response } from 'express';
 import { AppError } from '../utils/app-error';
 import {
     adminLinkIdParamSchema,
+    deactivateAdminLinksBodySchema,
+    deleteAdminLinksBodySchema,
     adminLinksQuerySchema,
+    restoreAdminLinksBodySchema,
     userIdSchema,
     userRoleSchema,
 } from '../schemas/admin-schema';
 import {
-    deactivateAdminLinkByIdService,
+    deactivateAdminLinksService,
+    deleteAdminLinksService,
     getAdminLinkByIdService,
     getAdminLinksService,
+    restoreAdminLinksService,
 } from '../services/admin/admin-link-service';
 import { AuditRequestMethod, AuditStatus, AuditTargetType } from '../enum/audit';
 import { recordAdminAuditLogService } from '../services/admin/admin-audit-log-service';
 import { logger } from '../lib/logger';
 
-const UNAUTHORIZED_MESSAGE = '未登入';
-const FORBIDDEN_MESSAGE = '權限不足';
-const INVALID_QUERY_MESSAGE = '參數格式有誤';
-const NOT_FOUND_MESSAGE = '查無資料';
-const LINK_DELETED_MESSAGE = '連結已刪除，無法停用';
-const LINK_DISABLED_MESSAGE = '連結已停用';
+const UNAUTHORIZED_MESSAGE = '未授權';
+const FORBIDDEN_MESSAGE = '禁止存取';
+const INVALID_QUERY_MESSAGE = '請求參數不正確';
+const NOT_FOUND_MESSAGE = '找不到連結';
+const ALL_LINKS_DELETE_FAILED_MESSAGE = '所有連結皆無法刪除';
+
+const ALL_LINKS_RESTORE_FAILED_MESSAGE = 'All links failed to restore';
+const ALL_LINKS_DEACTIVATE_FAILED_MESSAGE = '所有連結皆無法停用';
 
 const nextAppError = (next: NextFunction, statusCode: number, message: string): void => {
     next(new AppError(statusCode, message));
@@ -48,6 +55,49 @@ const parseActor = (
     };
 };
 
+const parseLinkId = (req: Request, next: NextFunction): number | null => {
+    const linkIdParams = adminLinkIdParamSchema.safeParse(req.params.id);
+    if (!linkIdParams.success) {
+        nextAppError(next, 400, INVALID_QUERY_MESSAGE);
+        return null;
+    }
+
+    return linkIdParams.data;
+};
+
+const writeAuditLog = (input: {
+    actorUserId: number;
+    actorRole: 'admin' | 'assistant';
+    action: string;
+    targetId: number | null;
+    targetDisplay: string | null;
+    requestPath: string;
+    requestMethod: AuditRequestMethod;
+    requestIp: string | undefined;
+    userAgent: string | null;
+    status: AuditStatus;
+    errorMessage: string | null;
+    diff: Record<string, unknown> | null;
+}): void => {
+    void recordAdminAuditLogService({
+        actorUserId: input.actorUserId,
+        actorRole: input.actorRole,
+        action: input.action,
+        targetType: AuditTargetType.Link,
+        targetId: input.targetId,
+        targetDisplay: input.targetDisplay,
+        requestPath: input.requestPath,
+        requestMethod: input.requestMethod,
+        requestIp: input.requestIp,
+        userAgent: input.userAgent,
+        status: input.status,
+        errorMessage: input.errorMessage,
+        diff: input.diff,
+    }).catch((error) => {
+        logger.warn('[audit] write failed', error);
+    });
+};
+
 export const getAdminLinks = async (
     req: Request,
     res: Response,
@@ -67,11 +117,10 @@ export const getAdminLinks = async (
     try {
         const result = await getAdminLinksService(parsed.data);
 
-        void recordAdminAuditLogService({
+        writeAuditLog({
             actorUserId: actor.userId,
             actorRole: actor.userRole,
             action: 'get_admin_links',
-            targetType: AuditTargetType.Link,
             targetId: null,
             targetDisplay: null,
             requestPath: req.originalUrl,
@@ -81,8 +130,6 @@ export const getAdminLinks = async (
             status: AuditStatus.Success,
             errorMessage: null,
             diff: null,
-        }).catch((error) => {
-            logger.warn('[audit] write failed', error);
         });
 
         res.status(200).json({
@@ -93,11 +140,10 @@ export const getAdminLinks = async (
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
 
-        void recordAdminAuditLogService({
+        writeAuditLog({
             actorUserId: actor.userId,
             actorRole: actor.userRole,
             action: 'get_admin_links',
-            targetType: AuditTargetType.Link,
             targetId: null,
             targetDisplay: null,
             requestPath: req.originalUrl,
@@ -107,8 +153,6 @@ export const getAdminLinks = async (
             status: AuditStatus.Failed,
             errorMessage: message,
             diff: null,
-        }).catch((auditError) => {
-            logger.warn('[audit] write failed', auditError);
         });
 
         next(error);
@@ -125,22 +169,18 @@ export const getAdminLinkById = async (
         return;
     }
 
-    const linkIdParams = adminLinkIdParamSchema.safeParse(req.params.id);
-    if (!linkIdParams.success) {
-        nextAppError(next, 400, INVALID_QUERY_MESSAGE);
+    const linkId = parseLinkId(req, next);
+    if (linkId === null) {
         return;
     }
-
-    const linkId = linkIdParams.data;
 
     try {
         const result = await getAdminLinkByIdService(linkId);
 
-        void recordAdminAuditLogService({
+        writeAuditLog({
             actorUserId: actor.userId,
             actorRole: actor.userRole,
             action: 'get_admin_link',
-            targetType: AuditTargetType.Link,
             targetId: linkId,
             targetDisplay: result.code,
             requestPath: req.originalUrl,
@@ -150,8 +190,6 @@ export const getAdminLinkById = async (
             status: AuditStatus.Success,
             errorMessage: null,
             diff: null,
-        }).catch((error) => {
-            logger.warn('[audit] write failed', error);
         });
 
         res.status(200).json({
@@ -162,11 +200,10 @@ export const getAdminLinkById = async (
         const message = error instanceof Error ? error.message : String(error);
         const isNotFound = error instanceof AppError && error.statusCode === 404;
 
-        void recordAdminAuditLogService({
+        writeAuditLog({
             actorUserId: actor.userId,
             actorRole: actor.userRole,
             action: 'get_admin_link',
-            targetType: AuditTargetType.Link,
             targetId: linkId,
             targetDisplay: null,
             requestPath: req.originalUrl,
@@ -176,8 +213,6 @@ export const getAdminLinkById = async (
             status: AuditStatus.Failed,
             errorMessage: message,
             diff: null,
-        }).catch((auditError) => {
-            logger.warn('[audit] write failed', auditError);
         });
 
         if (isNotFound) {
@@ -199,52 +234,54 @@ export const deactivateAdminLinkById = async (
         return;
     }
 
-    const linkIdParams = adminLinkIdParamSchema.safeParse(req.params.id);
-    if (!linkIdParams.success) {
+    const parsedBody = deactivateAdminLinksBodySchema.safeParse(req.body);
+    if (!parsedBody.success) {
         nextAppError(next, 400, INVALID_QUERY_MESSAGE);
         return;
     }
 
-    const linkId = linkIdParams.data;
-
     try {
-        const result = await deactivateAdminLinkByIdService(linkId);
+        const result = await deactivateAdminLinksService(parsedBody.data);
+        const responseStatus =
+            result.failed.length === 0 ? 200 : result.succeeded.length === 0 ? 422 : 207;
+        const auditStatus = result.succeeded.length === 0 ? AuditStatus.Failed : AuditStatus.Success;
+        const errorMessage = result.succeeded.length === 0 ? ALL_LINKS_DEACTIVATE_FAILED_MESSAGE : null;
 
-        void recordAdminAuditLogService({
+        writeAuditLog({
             actorUserId: actor.userId,
             actorRole: actor.userRole,
             action: 'deactivate_admin_link',
-            targetType: AuditTargetType.Link,
-            targetId: linkId,
-            targetDisplay: String(linkId),
+            targetId: null,
+            targetDisplay: null,
             requestPath: req.originalUrl,
             requestMethod: AuditRequestMethod.PATCH,
             requestIp: req.ip,
             userAgent: req.get('user-agent') ?? null,
-            status: AuditStatus.Success,
-            errorMessage: null,
+            status: auditStatus,
+            errorMessage,
             diff: {
-                before: result.before,
-                after: result.after,
+                succeeded: result.succeeded,
+                failed: result.failed,
             },
-        }).catch((error) => {
-            logger.warn('[audit] write failed', error);
         });
 
-        res.status(200).json({
+        if (responseStatus === 422) {
+            nextAppError(next, 422, ALL_LINKS_DEACTIVATE_FAILED_MESSAGE);
+            return;
+        }
+
+        res.status(responseStatus).json({
             ok: true,
             data: result,
         });
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        const statusCode = error instanceof AppError ? error.statusCode : 500;
 
-        void recordAdminAuditLogService({
+        writeAuditLog({
             actorUserId: actor.userId,
             actorRole: actor.userRole,
             action: 'deactivate_admin_link',
-            targetType: AuditTargetType.Link,
-            targetId: linkId,
+            targetId: null,
             targetDisplay: null,
             requestPath: req.originalUrl,
             requestMethod: AuditRequestMethod.PATCH,
@@ -253,24 +290,151 @@ export const deactivateAdminLinkById = async (
             status: AuditStatus.Failed,
             errorMessage: message,
             diff: null,
-        }).catch((auditError) => {
-            logger.warn('[audit] write failed', auditError);
         });
 
-        if (statusCode === 404) {
-            nextAppError(next, 404, NOT_FOUND_MESSAGE);
+        next(error);
+    }
+};
+
+export const deleteAdminLinkById = async (
+    req: Request,
+    res: Response,
+    next: NextFunction = () => undefined,
+): Promise<void> => {
+    const actor = parseActor(req, next);
+    if (!actor) {
+        return;
+    }
+
+    const parsedBody = deleteAdminLinksBodySchema.safeParse(req.body);
+    if (!parsedBody.success) {
+        nextAppError(next, 400, INVALID_QUERY_MESSAGE);
+        return;
+    }
+
+    try {
+        const result = await deleteAdminLinksService(parsedBody.data);
+        const responseStatus =
+            result.failed.length === 0 ? 200 : result.succeeded.length === 0 ? 422 : 207;
+        const auditStatus = result.succeeded.length === 0 ? AuditStatus.Failed : AuditStatus.Success;
+        const errorMessage = result.succeeded.length === 0 ? ALL_LINKS_DELETE_FAILED_MESSAGE : null;
+
+        writeAuditLog({
+            actorUserId: actor.userId,
+            actorRole: actor.userRole,
+            action: 'delete_admin_link',
+            targetId: null,
+            targetDisplay: null,
+            requestPath: req.originalUrl,
+            requestMethod: AuditRequestMethod.DELETE,
+            requestIp: req.ip,
+            userAgent: req.get('user-agent') ?? null,
+            status: auditStatus,
+            errorMessage,
+            diff: {
+                succeeded: result.succeeded,
+                failed: result.failed,
+            },
+        });
+
+        if (responseStatus === 422) {
+            nextAppError(next, 422, ALL_LINKS_DELETE_FAILED_MESSAGE);
             return;
         }
 
-        if (statusCode === 409 && message.includes('刪除')) {
-            nextAppError(next, 409, LINK_DELETED_MESSAGE);
+        res.status(responseStatus).json({
+            ok: true,
+            data: result,
+        });
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+
+        writeAuditLog({
+            actorUserId: actor.userId,
+            actorRole: actor.userRole,
+            action: 'delete_admin_link',
+            targetId: null,
+            targetDisplay: null,
+            requestPath: req.originalUrl,
+            requestMethod: AuditRequestMethod.DELETE,
+            requestIp: req.ip,
+            userAgent: req.get('user-agent') ?? null,
+            status: AuditStatus.Failed,
+            errorMessage: message,
+            diff: null,
+        });
+
+        next(error);
+    }
+};
+
+export const restoreAdminLinks = async (
+    req: Request,
+    res: Response,
+    next: NextFunction = () => undefined,
+): Promise<void> => {
+    const actor = parseActor(req, next);
+    if (!actor) {
+        return;
+    }
+
+    const parsedBody = restoreAdminLinksBodySchema.safeParse(req.body);
+    if (!parsedBody.success) {
+        nextAppError(next, 400, INVALID_QUERY_MESSAGE);
+        return;
+    }
+
+    try {
+        const result = await restoreAdminLinksService(parsedBody.data);
+        const responseStatus =
+            result.failed.length === 0 ? 200 : result.succeeded.length === 0 ? 422 : 207;
+        const auditStatus = result.succeeded.length === 0 ? AuditStatus.Failed : AuditStatus.Success;
+        const errorMessage = result.succeeded.length === 0 ? ALL_LINKS_RESTORE_FAILED_MESSAGE : null;
+
+        writeAuditLog({
+            actorUserId: actor.userId,
+            actorRole: actor.userRole,
+            action: 'restore_admin_link',
+            targetId: null,
+            targetDisplay: null,
+            requestPath: req.originalUrl,
+            requestMethod: AuditRequestMethod.PATCH,
+            requestIp: req.ip,
+            userAgent: req.get('user-agent') ?? null,
+            status: auditStatus,
+            errorMessage,
+            diff: {
+                succeeded: result.succeeded,
+                failed: result.failed,
+            },
+        });
+
+        if (responseStatus === 422) {
+            nextAppError(next, 422, ALL_LINKS_RESTORE_FAILED_MESSAGE);
             return;
         }
 
-        if (statusCode === 409 && message.includes('停用')) {
-            nextAppError(next, 409, LINK_DISABLED_MESSAGE);
-            return;
-        }
+        res.status(responseStatus).json({
+            ok: true,
+            data: result,
+        });
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+
+        writeAuditLog({
+            actorUserId: actor.userId,
+            actorRole: actor.userRole,
+            action: 'restore_admin_link',
+            targetId: null,
+            targetDisplay: null,
+            requestPath: req.originalUrl,
+            requestMethod: AuditRequestMethod.PATCH,
+            requestIp: req.ip,
+            userAgent: req.get('user-agent') ?? null,
+            status: AuditStatus.Failed,
+            errorMessage: message,
+            diff: null,
+        });
 
         next(error);
     }

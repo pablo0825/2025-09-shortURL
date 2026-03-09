@@ -11,13 +11,21 @@ const getAdminLinkById = vi.fn((_req: Request, res: Response) => {
 const deactivateAdminLinkById = vi.fn((_req: Request, res: Response) => {
     res.status(200).json({ ok: true });
 });
+const deleteAdminLinkById = vi.fn((_req: Request, res: Response) => {
+    res.status(200).json({ ok: true });
+});
+const restoreAdminLinks = vi.fn((_req: Request, res: Response) => {
+    res.status(200).json({ ok: true });
+});
 
 const passThrough = (_req: Request, _res: Response, next: NextFunction): void => next();
 
 vi.mock('../../src/controllers/admin-link-controllers', () => ({
     deactivateAdminLinkById,
+    deleteAdminLinkById,
     getAdminLinkById,
     getAdminLinks,
+    restoreAdminLinks,
 }));
 
 vi.mock('../../src/middlewares/auth/authenticate-tokens', () => ({
@@ -77,20 +85,40 @@ describe('admin-route integration', () => {
         expect(getAdminLinkById).toHaveBeenCalled();
     });
 
-    it('should route PATCH /links/:id/deactivate to controller', async () => {
+    it('should route PATCH /links/deactivate to controller', async () => {
         const response = await invokeRouter(router, {
             method: 'PATCH',
-            url: '/links/101/deactivate',
+            url: '/links/deactivate',
         });
 
         expect(response.statusCode).toBe(200);
         expect(deactivateAdminLinkById).toHaveBeenCalled();
     });
 
+    it('should route DELETE /links to controller', async () => {
+        const response = await invokeRouter(router, {
+            method: 'DELETE',
+            url: '/links',
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(deleteAdminLinkById).toHaveBeenCalled();
+    });
+
+    it('should route PATCH /links/restore to controller', async () => {
+        const response = await invokeRouter(router, {
+            method: 'PATCH',
+            url: '/links/restore',
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(restoreAdminLinks).toHaveBeenCalled();
+    });
+
     it('should stop at authenticate middleware when unauthorized', async () => {
         const response = await invokeRouter(router, {
             method: 'PATCH',
-            url: '/links/101/deactivate',
+            url: '/links/deactivate',
             headers: { 'x-no-auth': '1' },
         });
 

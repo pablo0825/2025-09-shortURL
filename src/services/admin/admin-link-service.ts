@@ -1,18 +1,27 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/pool';
 import { AppError } from '../../utils/app-error';
-import type { AdminLinksQueryDto } from '../../schemas/admin-schema';
+import type {
+    AdminLinksQueryDto,
+    DeactivateAdminLinksBodyDto,
+    DeleteAdminLinksBodyDto,
+    RestoreAdminLinksBodyDto,
+} from '../../schemas/admin-schema';
 import {
     deactivateAdminLinkById,
     findAdminLinkById,
     findAdminLinkStateByIdForUpdate,
     listAdminLinks,
+    restoreAdminLinkById,
+    softDeleteAdminLinkById,
     type AdminLinksStatusFilter,
     type ListAdminLinksQuery,
 } from '../../repositories/admin/link-admin-repository';
 
 const SHORT_BASE_URL = process.env.SHORT_BASE_URL?.replace(/\/+$/, '') || 'http://localhost:3001';
-
+const LINK_NOT_FOUND_MESSAGE = '找不到連結';
+const LINK_ALREADY_DELETED_MESSAGE = '連結已刪除';
+const LINK_ALREADY_DISABLED_MESSAGE = '連結已停用';
 type LinkStatus = 'active' | 'expired' | 'disabled' | 'deleted';
 
 interface AdminLinkItem {
@@ -71,13 +80,75 @@ interface DeactivateAdminLinkResult {
     id: number;
     before: {
         isActive: boolean;
+        deletedAt: string | null;
         status: LinkStatus;
     };
     after: {
         isActive: false;
+        deletedAt: null;
         status: 'disabled';
     };
     updatedAt: string;
+}
+
+interface DeactivateAdminLinkFailedResult {
+    id: number;
+    reason: string;
+}
+
+interface DeactivateAdminLinksResult {
+    succeeded: DeactivateAdminLinkResult[];
+    failed: DeactivateAdminLinkFailedResult[];
+}
+
+interface DeleteAdminLinkResult {
+    id: number;
+    before: {
+        isActive: boolean;
+        deletedAt: string | null;
+        status: LinkStatus;
+    };
+    after: {
+        isActive: false;
+        deletedAt: string;
+        status: 'deleted';
+    };
+    updatedAt: string;
+}
+
+interface DeleteAdminLinkFailedResult {
+    id: number;
+    reason: string;
+}
+
+interface DeleteAdminLinksResult {
+    succeeded: DeleteAdminLinkResult[];
+    failed: DeleteAdminLinkFailedResult[];
+}
+
+interface RestoreAdminLinkResult {
+    id: number;
+    before: {
+        isActive: boolean;
+        deletedAt: string | null;
+        status: LinkStatus;
+    };
+    after: {
+        isActive: boolean;
+        deletedAt: null;
+        status: 'active' | 'expired';
+    };
+    updatedAt: string;
+}
+
+interface RestoreAdminLinkFailedResult {
+    id: number;
+    reason: string;
+}
+
+interface RestoreAdminLinksResult {
+    succeeded: RestoreAdminLinkResult[];
+    failed: RestoreAdminLinkFailedResult[];
 }
 
 const resolveLinkStatus = (
@@ -93,6 +164,10 @@ const resolveLinkStatus = (
         return 'disabled';
     }
 
+    return new Date(expireAt).getTime() <= Date.now() ? 'expired' : 'active';
+};
+
+const resolveRestoredLinkStatus = (expireAt: string): 'active' | 'expired' => {
     return new Date(expireAt).getTime() <= Date.now() ? 'expired' : 'active';
 };
 
@@ -208,7 +283,7 @@ export const getAdminLinkByIdService = async (id: number): Promise<AdminLinkDeta
     try {
         const row = await findAdminLinkById(id);
         if (!row || !row.code) {
-            throw new AppError(404, '查無資料');
+            throw new AppError(404, LINK_NOT_FOUND_MESSAGE);
         }
 
         const shortUrl = new URL(`/${row.code}`, SHORT_BASE_URL).toString();
@@ -259,20 +334,20 @@ export const deactivateAdminLinkByIdService = async (
 
         const state = await findAdminLinkStateByIdForUpdate(client, id);
         if (!state) {
-            throw new AppError(404, '查無資料');
+            throw new AppError(404, LINK_NOT_FOUND_MESSAGE);
         }
 
         if (state.deleted_at !== null) {
-            throw new AppError(409, '連結已刪除，無法停用');
+            throw new AppError(409, LINK_ALREADY_DELETED_MESSAGE);
         }
 
         if (!state.is_active) {
-            throw new AppError(409, '連結已停用');
+            throw new AppError(409, LINK_ALREADY_DISABLED_MESSAGE);
         }
 
         const updated = await deactivateAdminLinkById(client, id);
         if (!updated) {
-            throw new AppError(404, '查無資料');
+            throw new AppError(404, LINK_NOT_FOUND_MESSAGE);
         }
 
         await client.query('COMMIT');
@@ -281,10 +356,12 @@ export const deactivateAdminLinkByIdService = async (
             id,
             before: {
                 isActive: state.is_active,
+                deletedAt: state.deleted_at,
                 status: resolveLinkStatus(state.deleted_at, state.expire_at, state.is_active),
             },
             after: {
                 isActive: false,
+                deletedAt: null,
                 status: 'disabled',
             },
             updatedAt: updated.updated_at,
@@ -299,6 +376,328 @@ export const deactivateAdminLinkByIdService = async (
         }
 
         throw wrapServiceError('adminLinkService.deactivateAdminLinkById', error);
+    } finally {
+        if (client) {
+            client.release();
+        }
+    }
+};
+
+export const deactivateAdminLinksService = async (
+    input: DeactivateAdminLinksBodyDto,
+): Promise<DeactivateAdminLinksResult> => {
+    let client: PoolClient | undefined;
+
+    try {
+        client = await pool.connect();
+        await client.query('BEGIN');
+
+        const succeeded: DeactivateAdminLinkResult[] = [];
+        const failed: DeactivateAdminLinkFailedResult[] = [];
+
+        for (const id of input.ids) {
+            const state = await findAdminLinkStateByIdForUpdate(client, id);
+            if (!state) {
+                failed.push({
+                    id,
+                    reason: LINK_NOT_FOUND_MESSAGE,
+                });
+                continue;
+            }
+
+            const status = resolveLinkStatus(state.deleted_at, state.expire_at, state.is_active);
+            if (status === 'deleted') {
+                failed.push({
+                    id,
+                    reason: '連結已刪除，請使用 restore',
+                });
+                continue;
+            }
+
+            if (status === 'disabled') {
+                failed.push({
+                    id,
+                    reason: '連結已停用，請使用 reactivate',
+                });
+                continue;
+            }
+
+            if (status === 'expired') {
+                failed.push({
+                    id,
+                    reason: '連結已過期，無法停用',
+                });
+                continue;
+            }
+
+            const updated = await deactivateAdminLinkById(client, id);
+            if (!updated) {
+                failed.push({
+                    id,
+                    reason: LINK_NOT_FOUND_MESSAGE,
+                });
+                continue;
+            }
+
+            succeeded.push({
+                id,
+                before: {
+                    isActive: state.is_active,
+                    deletedAt: state.deleted_at,
+                    status,
+                },
+                after: {
+                    isActive: false,
+                    deletedAt: null,
+                    status: 'disabled',
+                },
+                updatedAt: updated.updated_at,
+            });
+        }
+
+        await client.query('COMMIT');
+
+        return {
+            succeeded,
+            failed,
+        };
+    } catch (error) {
+        if (client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                throw wrapServiceError('adminLinkService.deactivateAdminLinks.rollback', rollbackError);
+            }
+        }
+
+        throw wrapServiceError('adminLinkService.deactivateAdminLinks', error);
+    } finally {
+        if (client) {
+            client.release();
+        }
+    }
+};
+
+export const deleteAdminLinkByIdService = async (id: number): Promise<DeleteAdminLinkResult> => {
+    let client: PoolClient | undefined;
+
+    try {
+        client = await pool.connect();
+        await client.query('BEGIN');
+
+        const state = await findAdminLinkStateByIdForUpdate(client, id);
+        if (!state) {
+            throw new AppError(404, LINK_NOT_FOUND_MESSAGE);
+        }
+
+        if (state.deleted_at !== null) {
+            throw new AppError(409, LINK_ALREADY_DELETED_MESSAGE);
+        }
+
+        const updated = await softDeleteAdminLinkById(client, id);
+        if (!updated) {
+            throw new AppError(404, LINK_NOT_FOUND_MESSAGE);
+        }
+
+        await client.query('COMMIT');
+
+        return {
+            id,
+            before: {
+                isActive: state.is_active,
+                deletedAt: state.deleted_at,
+                status: resolveLinkStatus(state.deleted_at, state.expire_at, state.is_active),
+            },
+            after: {
+                isActive: false,
+                deletedAt: updated.deleted_at,
+                status: 'deleted',
+            },
+            updatedAt: updated.updated_at,
+        };
+    } catch (error) {
+        if (client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                throw wrapServiceError('adminLinkService.deleteAdminLinkById.rollback', rollbackError);
+            }
+        }
+
+        throw wrapServiceError('adminLinkService.deleteAdminLinkById', error);
+    } finally {
+        if (client) {
+            client.release();
+        }
+    }
+};
+
+export const deleteAdminLinksService = async (
+    input: DeleteAdminLinksBodyDto,
+): Promise<DeleteAdminLinksResult> => {
+    let client: PoolClient | undefined;
+
+    try {
+        client = await pool.connect();
+        await client.query('BEGIN');
+
+        const succeeded: DeleteAdminLinkResult[] = [];
+        const failed: DeleteAdminLinkFailedResult[] = [];
+
+        for (const id of input.ids) {
+            const state = await findAdminLinkStateByIdForUpdate(client, id);
+            if (!state) {
+                failed.push({
+                    id,
+                    reason: LINK_NOT_FOUND_MESSAGE,
+                });
+                continue;
+            }
+
+            if (state.deleted_at !== null) {
+                failed.push({
+                    id,
+                    reason: '連結已刪除，無法被刪除',
+                });
+                continue;
+            }
+
+            const updated = await softDeleteAdminLinkById(client, id);
+            if (!updated) {
+                failed.push({
+                    id,
+                    reason: LINK_NOT_FOUND_MESSAGE,
+                });
+                continue;
+            }
+
+            succeeded.push({
+                id,
+                before: {
+                    isActive: state.is_active,
+                    deletedAt: state.deleted_at,
+                    status: resolveLinkStatus(state.deleted_at, state.expire_at, state.is_active),
+                },
+                after: {
+                    isActive: false,
+                    deletedAt: updated.deleted_at,
+                    status: 'deleted',
+                },
+                updatedAt: updated.updated_at,
+            });
+        }
+
+        await client.query('COMMIT');
+
+        return {
+            succeeded,
+            failed,
+        };
+    } catch (error) {
+        if (client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                throw wrapServiceError('adminLinkService.deleteAdminLinks.rollback', rollbackError);
+            }
+        }
+
+        throw wrapServiceError('adminLinkService.deleteAdminLinks', error);
+    } finally {
+        if (client) {
+            client.release();
+        }
+    }
+};
+
+export const restoreAdminLinksService = async (
+    input: RestoreAdminLinksBodyDto,
+): Promise<RestoreAdminLinksResult> => {
+    let client: PoolClient | undefined;
+
+    try {
+        client = await pool.connect();
+        await client.query('BEGIN');
+
+        const succeeded: RestoreAdminLinkResult[] = [];
+        const failed: RestoreAdminLinkFailedResult[] = [];
+
+        for (const id of input.ids) {
+            const state = await findAdminLinkStateByIdForUpdate(client, id);
+            if (!state) {
+                failed.push({
+                    id,
+                    reason: LINK_NOT_FOUND_MESSAGE,
+                });
+                continue;
+            }
+
+            const status = resolveLinkStatus(state.deleted_at, state.expire_at, state.is_active);
+            if (status === 'active') {
+                failed.push({
+                    id,
+                    reason: 'Link is active',
+                });
+                continue;
+            }
+
+            if (status === 'disabled') {
+                failed.push({
+                    id,
+                    reason: 'Link is disabled',
+                });
+                continue;
+            }
+
+            if (status === 'expired') {
+                failed.push({
+                    id,
+                    reason: 'Link is expired',
+                });
+                continue;
+            }
+
+            const updated = await restoreAdminLinkById(client, id);
+            if (!updated) {
+                failed.push({
+                    id,
+                    reason: LINK_NOT_FOUND_MESSAGE,
+                });
+                continue;
+            }
+
+            succeeded.push({
+                id,
+                before: {
+                    isActive: state.is_active,
+                    deletedAt: state.deleted_at,
+                    status,
+                },
+                after: {
+                    isActive: updated.is_active,
+                    deletedAt: null,
+                    status: resolveRestoredLinkStatus(state.expire_at),
+                },
+                updatedAt: updated.updated_at,
+            });
+        }
+
+        await client.query('COMMIT');
+
+        return {
+            succeeded,
+            failed,
+        };
+    } catch (error) {
+        if (client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                throw wrapServiceError('adminLinkService.restoreAdminLinks.rollback', rollbackError);
+            }
+        }
+
+        throw wrapServiceError('adminLinkService.restoreAdminLinks', error);
     } finally {
         if (client) {
             client.release();

@@ -96,3 +96,21 @@ export type AdminLinksQueryDto = z.infer<typeof adminLinksQuerySchema>;
 
 export const adminLinkIdParamSchema = z.coerce.number().int().positive();
 
+export const deactivateAdminLinksBodySchema = z.object({
+    ids: z.array(z.coerce.number().int().positive()).min(1).max(50),
+});
+
+export type DeactivateAdminLinksBodyDto = z.infer<typeof deactivateAdminLinksBodySchema>;
+
+export const deleteAdminLinksBodySchema = z.object({
+    ids: z.array(z.coerce.number().int().positive()).min(1).max(50),
+});
+
+export type DeleteAdminLinksBodyDto = z.infer<typeof deleteAdminLinksBodySchema>;
+
+export const restoreAdminLinksBodySchema = z.object({
+    ids: z.array(z.coerce.number().int().positive()).min(1).max(50),
+});
+
+export type RestoreAdminLinksBodyDto = z.infer<typeof restoreAdminLinksBodySchema>;
+
