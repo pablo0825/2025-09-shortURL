@@ -2,7 +2,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { longUrlSchema } from '../../schemas/long-url-schema';
 import { isForbiddenTarget } from '../../lib/is-forbidden-target';
-import { recordLinkLogService } from '../../services/link/link-log-service';
 import { buildCacheKey, cacheDel, cacheExists, cacheGet } from '../../lib/cache';
 
 const LongUrlSchema = longUrlSchema({
@@ -11,16 +10,6 @@ const LongUrlSchema = longUrlSchema({
     stripTrackingParams: true,
     maxLength: 2048,
 });
-
-const buildLinkLogPayload = (req: Request) => {
-    return {
-        ip: req.ip ?? null,
-        ua: req.get?.('user-agent') ?? null,
-        referer: req.get?.('referer') ?? null,
-        path: req.originalUrl ?? '',
-        at: new Date().toISOString(),
-    };
-};
 
 // 正向+負向快取
 // 運用快取加速URL轉跳的速度
@@ -46,7 +35,6 @@ export async function cacheShortUrl(req: Request, res: Response, next: NextFunct
         // 負向快取
         // 阻擋不存在的短碼瘋狂攻擊
         if (await cacheExists(tomb)) {
-            void recordLinkLogService('null', buildLinkLogPayload(req), 'link不存在(負向快取命中)');
             return res.status(404).json({
                 ok: false,
                 error: 'shortURL 不存在(redis)',
@@ -76,9 +64,6 @@ export async function cacheShortUrl(req: Request, res: Response, next: NextFunct
                 error: '不允許的目標主機(快取)',
             });
         }
-
-        // 把log紀錄寫入到link_log中
-        void recordLinkLogService('null', buildLinkLogPayload(req), 'link被使用(快取命中)');
 
         return res.redirect(302, longUrl);
     } catch {

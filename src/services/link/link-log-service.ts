@@ -1,22 +1,35 @@
 import { logger } from '../../lib/logger';
-import { insertLinkLog } from '../../repositories/link/link-repository';
+import { parseDeviceType } from '../../lib/device-type';
+import { fetchCountryCode } from '../../lib/geo-ip';
+import { insertLinkClickEvent } from '../../repositories/link/link-click-event-repository';
 
-export interface LinkLogPayload {
+export interface LinkClickPayload {
     ip: string | null;
     ua: string | null;
     referer: string | null;
-    path: string;
-    at: string;
+    clickedAt: string;
 }
 
-export const recordLinkLogService = async (
+export const recordLinkClickService = async (
     linkId: string,
-    logInfo: LinkLogPayload,
-    info: string,
+    payload: LinkClickPayload,
 ): Promise<void> => {
     try {
-        await insertLinkLog(linkId, logInfo);
+        const [countryCode, deviceType] = await Promise.all([
+            fetchCountryCode(payload.ip),
+            Promise.resolve(parseDeviceType(payload.ua)),
+        ]);
+
+        await insertLinkClickEvent({
+            linkId,
+            clickedAt: payload.clickedAt,
+            visitorIp: payload.ip,
+            referer: payload.referer,
+            userAgent: payload.ua,
+            deviceType,
+            countryCode,
+        });
     } catch (err) {
-        logger.warn('[linkLogService.recordLinkLog] 寫入失敗', { err, linkId, info });
+        logger.warn('[linkClickService.recordLinkClick] 寫入失敗', { err, linkId });
     }
 };

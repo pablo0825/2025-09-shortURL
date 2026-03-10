@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { longUrlSchema } from '../schemas/long-url-schema';
-import { recordLinkLogService } from '../services/link/link-log-service';
+import { recordLinkClickService } from '../services/link/link-log-service';
 import { linkIdParamSchema, listLinksQuerySchema } from '../schemas/link-schema';
 import {
     createShortUrlService,
@@ -17,13 +17,12 @@ const LongUrlSchema = longUrlSchema({
     maxLength: 2048,
 });
 
-const buildLinkLogPayload = (req: Request) => {
+const buildLinkClickPayload = (req: Request) => {
     return {
         ip: req.ip ?? null,
         ua: req.get?.('user-agent') ?? null,
         referer: req.get?.('referer') ?? null,
-        path: req.originalUrl ?? '',
-        at: new Date().toISOString(),
+        clickedAt: new Date().toISOString(),
     };
 };
 
@@ -39,7 +38,6 @@ export const createShortUrl = async (req: Request, res: Response, next: NextFunc
 
     try {
         const result = await createShortUrlService(parsed.data, req.ip ?? null);
-        void recordLinkLogService(result.id, buildLinkLogPayload(req), `新增link ${result.shortUrl}`);
 
         return res.status(201).json({
             ok: true,
@@ -63,7 +61,7 @@ export const redirectToLongUrl = async (req: Request, res: Response, next: NextF
         }
 
         if (result.id) {
-            void recordLinkLogService(result.id, buildLinkLogPayload(req), 'link被使用');
+            void recordLinkClickService(result.id, buildLinkClickPayload(req));
         }
         return res.redirect(302, result.longUrl);
     } catch (err) {
@@ -126,7 +124,6 @@ export const deleteLink = async (req: Request, res: Response, next: NextFunction
             });
         }
 
-        void recordLinkLogService(id, buildLinkLogPayload(req), `已刪除 ${id}`);
         return res.status(200).json({
             ok: true,
             message: `已刪除 ${id}`,
@@ -151,7 +148,6 @@ export const deactivateLink = async (req: Request, res: Response, next: NextFunc
     try {
         const result = await deactivateLinkService(id);
         if (result.status === 'deactivated') {
-            void recordLinkLogService(id, buildLinkLogPayload(req), `${id} link停用`);
             return res.status(200).json({
                 ok: true,
                 msg: `${id} 已停用`,
