@@ -8,7 +8,7 @@
 
 ## Project Overview
 
-This project is a **URL shortener backend API service** responsible for creating, querying, and redirecting short URLs. It uses Node.js + Express to handle requests, PostgreSQL to store URL data, and Redis to cache frequently accessed short URLs for improved query performance.
+This project is a **URL shortener backend API service** responsible for creating, querying, and redirecting short URLs. It uses Node.js + Express to handle requests, PostgreSQL to store URL data, and Redis to cache frequently accessed short URLs for improved query performance. It also provides full support for RBAC (Role-Based Access Control), rate limiting, and Two-Factor Authentication (2FA).
 
 ### Tech Stack
 
@@ -23,6 +23,7 @@ This project is a **URL shortener backend API service** responsible for creating
 | Testing | Vitest |
 | Rate Limiting | express-rate-limit |
 | Security Headers | helmet |
+| 2FA | otplib, qrcode, bcrypt |
 | Reverse Proxy | Nginx |
 | Containerization | Docker |
 
@@ -107,7 +108,7 @@ Route → Controller → Service → Repository → Database
 ### Language & Style
 - Always use **TypeScript**. Adding `.js` files under `src/` is not allowed.
 - Use **ES Modules** (`import` / `export`). Do not use `require`.
-- Use **2-space indentation** and **single quotes** `'` for strings.
+- Use **4-space indentation** and **single quotes** `'` for strings.
 - Each function should have a single responsibility and ideally not exceed 50 lines.
 - Always use **`async/await`**. Avoid `.then()` chains.
 
@@ -124,7 +125,7 @@ fetchUser(id).then(user => { ... });
 ```ts
 // ✅ Correct
 export const fetchUser = async (id: string): Promise<User> => {
-  // implementation
+    // implementation
 }
 
 // ❌ Forbidden: avoid default exports
@@ -138,9 +139,9 @@ export default async function fetchUser(id: string): Promise<User> { ... }
 ```ts
 // ✅ Correct
 interface UrlRecord {
-  id: number;
-  shortCode: string;
-  originalUrl: string;
+    id: number;
+    shortCode: string;
+    originalUrl: string;
 }
 
 type UrlStatus = 'active' | 'expired';
@@ -166,19 +167,19 @@ type UrlStatus = string                               // should be explicitly de
 ```ts
 // ✅ Correct: has runtime value → src/enum/
 export enum HttpMethod {
-  GET = 'GET',
-  POST = 'POST',
+    GET = 'GET',
+    POST = 'POST',
 }
 
 export enum AuthEvent {
-  FORGOT_PASSWORD = 'FORGOT_PASSWORD',
-  RESET_PASSWORD = 'RESET_PASSWORD',
+    FORGOT_PASSWORD = 'FORGOT_PASSWORD',
+    RESET_PASSWORD = 'RESET_PASSWORD',
 }
 
 // ✅ Correct: type only → src/types/
 export interface UrlRecord {
-  id: number;
-  shortCode: string;
+    id: number;
+    shortCode: string;
 }
 
 // ❌ Forbidden: do not put enums in types/, or interfaces in enum/
@@ -203,20 +204,21 @@ const result = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
 const result = await pool.query(`SELECT * FROM users WHERE id = ${userId}`);
 ```
 
-- When a transaction is needed, use `pool.connect()` to obtain a client and manage `BEGIN / COMMIT / ROLLBACK` manually. **`client.release()` must be placed in the `finally` block** to ensure the connection is never leaked regardless of success or failure.
+- When a transaction is needed, declare `let client: PoolClient | undefined` outside the `try` block, then call `pool.connect()` inside the `try` block to obtain a client and manage `BEGIN / COMMIT / ROLLBACK` manually. **`client?.release()` must be placed in the `finally` block** to ensure the connection is never leaked regardless of success or failure, and to avoid a secondary error if the connection itself fails.
 
 ```ts
 // ✅ Correct: release in finally, guaranteed to execute
-const client = await pool.connect();
+let client: PoolClient | undefined;
 try {
-  await client.query('BEGIN');
-  await client.query('INSERT INTO urls ...');
-  await client.query('COMMIT');
+    client = await pool.connect();
+    await client.query('BEGIN');
+    await client.query('INSERT INTO urls ...');
+    await client.query('COMMIT');
 } catch (err) {
-  await client.query('ROLLBACK');
-  throw err;
+    await client?.query('ROLLBACK');
+    throw err;
 } finally {
-  client.release();
+    client?.release();
 }
 ```
 
@@ -249,6 +251,14 @@ try {
 - Sensitive information (API keys, DB passwords, Redis URLs, etc.) must always be injected via environment variables. Hardcoding is not allowed.
 - `.env` must not be committed to version control. Only `.env.example` should be updated when changes are made.
 
+### Two-Factor Authentication (2FA)
+
+- Use **`otplib`** for TOTP verification and **`qrcode`** to generate a QR code Data URL to return to the frontend.
+- The **AES-256-GCM encryption key** must be read from environment variables. Hardcoding is not allowed.
+- Backup codes are generated using `crypto.randomBytes`, 10 codes in total. **Only the bcrypt-hashed results may be stored in the database — plaintext must never be persisted.**
+- The 2FA version tracks the active batch of backup codes. It must be incremented every time 2FA is re-enabled, invalidating all previous backup codes.
+- Temporary 2FA setup data stored in Redis must have a TTL (10 minutes recommended) to prevent stale unfinished setup data from persisting.
+
 ---
 
 ## Testing Standards
@@ -266,6 +276,7 @@ try {
 - All new features must have corresponding tests.
 - API routes must have **integration tests**.
 - The Service layer (`src/services/`) must have **unit tests**. Mock `src/repositories/` and `src/lib/cache.ts` when testing.
+- For 2FA-related Service tests, in addition to mocking `src/repositories/` and `src/lib/cache.ts`, also mock `otplib` verification methods, `crypto` random generation functions, and `bcrypt` hash methods to avoid tests depending on external time state, randomness, or unnecessary performance overhead.
 - Utility functions (`src/utils/`) must have **unit tests**.
 - Infrastructure wrappers (`src/lib/`) must have **unit tests**.
 - Permission initialization scripts (`src/rbac/`) must have **unit tests**. Mock `src/repositories/` and `src/lib/cache.ts` when testing.
@@ -281,28 +292,28 @@ try {
 
 ```ts
 describe('url-service', () => {
-  describe('createShortUrl', () => {
-    it('should successfully create a short URL', async () => {
-      // arrange
-      const mockUrl = 'https://example.com';
-      vi.mocked(urlRepository.create).mockResolvedValue({ id: 1, shortCode: 'abc123' });
+    describe('createShortUrl', () => {
+        it('should successfully create a short URL', async () => {
+            // arrange
+            const mockUrl = 'https://example.com';
+            vi.mocked(urlRepository.create).mockResolvedValue({ id: 1, shortCode: 'abc123' });
 
-      // act
-      const result = await urlService.createShortUrl(mockUrl);
+            // act
+            const result = await urlService.createShortUrl(mockUrl);
 
-      // assert
-      expect(result.shortCode).toBe('abc123');
+            // assert
+            expect(result.shortCode).toBe('abc123');
+        });
+
+        it('should throw an error when the short code already exists', async () => {
+            // arrange
+            vi.mocked(urlRepository.findByCode).mockResolvedValue({ id: 1 });
+
+            // act & assert
+            await expect(urlService.createShortUrl('https://example.com', 'abc123'))
+                .rejects.toThrow('Short code already exists');
+        });
     });
-
-    it('should throw an error when the short code already exists', async () => {
-      // arrange
-      vi.mocked(urlRepository.findByCode).mockResolvedValue({ id: 1 });
-
-      // act & assert
-      await expect(urlService.createShortUrl('https://example.com', 'abc123'))
-        .rejects.toThrow('Short code already exists');
-    });
-  });
 });
 ```
 
@@ -326,6 +337,10 @@ describe('url-service', () => {
 - All API routes must apply **rate limit middleware** (using `express-rate-limit`) to prevent abuse and brute-force attacks.
 - Use **helmet** to manage HTTP security headers, initialized once in `src/app.ts`.
 - CORS configuration must be managed centrally in `src/app.ts`. Setting it on individual routes is not allowed.
+- 2FA secrets must never be stored in plaintext. They must be encrypted using **AES-256-GCM** (using a key from environment variables), and `encrypted`, `iv`, and `authTag` must all be stored in the database.
+- Backup codes must never be stored in plaintext. They must be hashed using **bcrypt** before being stored in the database.
+- TOTP code verification during 2FA must use the validation method provided by `otplib`. Custom comparison logic is not allowed.
+- After a TOTP code is successfully verified, it must be recorded in Redis with a TTL of at least 90 seconds (to cover the valid window when `otplib` is configured with `window=1`) to prevent the same code from being used again within its validity window (replay attack).
 
 ---
 

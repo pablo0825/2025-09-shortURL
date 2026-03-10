@@ -7,7 +7,7 @@
 
 ## 專案概覽
 
-本專案為一個**短網址後端 API 服務**，負責短網址的建立、查詢與跳轉，使用 Node.js + Express 處理請求，PostgreSQL 儲存網址資料，Redis 快取熱門短網址以提升查詢效能。
+本專案為一個**短網址後端 API 服務**，負責短網址的建立、查詢與跳轉，使用 Node.js + Express 處理請求，PostgreSQL 儲存網址資料，Redis 快取熱門短網址以提升查詢效能，並具備完整的 RBAC（角色存取控制）驗證、速率限制與雙重驗證（2FA）支援。
 
 ### 技術棧
 
@@ -22,6 +22,7 @@
 | 測試框架 | Vitest |
 | Rate Limiting | express-rate-limit |
 | Security Headers | helmet |
+| 2FA | otplib、qrcode、bcrypt |
 | 反向代理 | Nginx |
 | 容器化 | Docker |
 
@@ -106,7 +107,7 @@ Route → Controller → Service → Repository → Database
 ### 語言與風格
 - 一律使用 **TypeScript**，不允許在 `src/` 新增 `.js` 檔案。
 - 使用 **ES Modules**（`import` / `export`），不使用 `require`。
-- 縮排使用 **2 個空格**，字串統一使用**單引號** `'`。
+- 縮排使用 **4 個空格**，字串統一使用**單引號** `'`。
 - 每個函式職責單一，建議不超過 50 行。
 - 一律使用 **`async/await`**，避免 `.then()` 鏈。
 
@@ -123,10 +124,10 @@ fetchUser(id).then(user => { ... });
 ```ts
 // ✅ 正確
 export const fetchUser = async (id: string): Promise<User> => {
-  // implementation
+    // implementation
 }
 
-// ❌ 禁止：不使用具名匯出
+// ❌ 禁止：使用預設匯出（Default Export）
 export default async function fetchUser(id: string): Promise<User> { ... }
 ```
 
@@ -137,9 +138,9 @@ export default async function fetchUser(id: string): Promise<User> { ... }
 ```ts
 // ✅ 正確
 interface UrlRecord {
-  id: number;
-  shortCode: string;
-  originalUrl: string;
+    id: number;
+    shortCode: string;
+    originalUrl: string;
 }
 
 type UrlStatus = 'active' | 'expired';
@@ -165,19 +166,19 @@ type UrlStatus = string                               // 應明確定義為聯�
 ```ts
 // ✅ 正確：執行期有值 → src/enum/
 export enum HttpMethod {
-  GET = 'GET',
-  POST = 'POST',
+    GET = 'GET',
+    POST = 'POST',
 }
 
 export enum AuthEvent {
-  FORGOT_PASSWORD = 'FORGOT_PASSWORD',
-  RESET_PASSWORD = 'RESET_PASSWORD',
+    FORGOT_PASSWORD = 'FORGOT_PASSWORD',
+    RESET_PASSWORD = 'RESET_PASSWORD',
 }
 
 // ✅ 正確：只有型別 → src/types/
 export interface UrlRecord {
-  id: number;
-  shortCode: string;
+    id: number;
+    shortCode: string;
 }
 
 // ❌ 禁止：enum 不放 types/，interface 不放 enum/
@@ -202,20 +203,21 @@ const result = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
 const result = await pool.query(`SELECT * FROM users WHERE id = ${userId}`);
 ```
 
-- 需要交易（Transaction）時，使用 `pool.connect()` 取得 client 並手動管理 `BEGIN / COMMIT / ROLLBACK`，**`client.release()` 必須放在 `finally` 區塊**，確保無論成功或失敗都不會洩漏 connection。
+- 需要交易（Transaction）時，以 `let client: PoolClient | undefined` 宣告於 `try` 外，在 `try` 區塊內呼叫 `pool.connect()` 取得 client 並手動管理 `BEGIN / COMMIT / ROLLBACK`，**`client?.release()` 必須放在 `finally` 區塊**，確保無論成功或失敗都不會洩漏 connection，且連線失敗時不會因 client 未定義而產生額外錯誤。
 
 ```ts
 // ✅ 正確：release 放在 finally，確保一定執行
-const client = await pool.connect();
+let client: PoolClient | undefined;
 try {
-  await client.query('BEGIN');
-  await client.query('INSERT INTO urls ...');
-  await client.query('COMMIT');
+    client = await pool.connect();
+    await client.query('BEGIN');
+    await client.query('INSERT INTO urls ...');
+    await client.query('COMMIT');
 } catch (err) {
-  await client.query('ROLLBACK');
-  throw err;
+    await client?.query('ROLLBACK');
+    throw err;
 } finally {
-  client.release();
+    client?.release();
 }
 ```
 
@@ -248,6 +250,14 @@ try {
 - 敏感資訊（API key、DB 密碼、Redis URL 等）一律透過環境變數注入，不得 hardcode。
 - `.env` 不得提交到版本控制，異動只更新 `.env.example`。
 
+### 雙重驗證（2FA）
+
+- 使用 **`otplib`** 實作 TOTP 驗證，使用 **`qrcode`** 產生 QR code Data URL 回傳前端。
+- **AES-256-GCM 加密金鑰**統一從環境變數讀取，不得 hardcode。
+- Backup code 使用 `crypto.randomBytes` 產生，共 10 組，**僅將以 bcrypt hash 後的結果存入資料庫，明文不得持久化**。
+- 2FA version 用於標記 backup code 的有效批次，每次重新啟用 2FA 時必須更新 version，使舊批次的 backup code 全部失效。
+- Redis 暫存的 2FA 初始化資料必須設定 TTL（建議 10 分鐘），避免未完成設定的資料長期殘留。
+
 ---
 
 ## 測試規範
@@ -265,6 +275,7 @@ try {
 - 所有新功能都必須有對應的測試。
 - API 路由必須有**整合測試**。
 - Service 層（`src/services/`）必須有**單元測試**，測試時須 mock `src/repositories/` 與 `src/lib/cache.ts`。
+- 2FA 相關 Service 測試時，除了 mock `src/repositories/` 與 `src/lib/cache.ts` 之外，還須 mock `otplib` 的驗證方法、`crypto` 的隨機產生函式與 `bcrypt` 的 hash 方法，避免測試依賴外部時間狀態、隨機性或產生不必要的效能負擔。
 - 工具函式（`src/utils/`）必須有**單元測試**。
 - 基礎設施封裝（`src/lib/`）必須有**單元測試**。
 - 權限初始化腳本（`src/rbac/`）必須有**單元測試**，測試時須 mock `src/repositories/` 與 `src/lib/cache.ts`。
@@ -280,28 +291,28 @@ try {
 
 ```ts
 describe('url-service', () => {
-  describe('createShortUrl', () => {
-    it('應該成功建立短網址', async () => {
-      // arrange
-      const mockUrl = 'https://example.com';
-      vi.mocked(urlRepository.create).mockResolvedValue({ id: 1, shortCode: 'abc123' });
+    describe('createShortUrl', () => {
+        it('應該成功建立短網址', async () => {
+            // arrange
+            const mockUrl = 'https://example.com';
+            vi.mocked(urlRepository.create).mockResolvedValue({ id: 1, shortCode: 'abc123' });
 
-      // act
-      const result = await urlService.createShortUrl(mockUrl);
+            // act
+            const result = await urlService.createShortUrl(mockUrl);
 
-      // assert
-      expect(result.shortCode).toBe('abc123');
+            // assert
+            expect(result.shortCode).toBe('abc123');
+        });
+
+        it('當短碼已存在時，應該拋出錯誤', async () => {
+            // arrange
+            vi.mocked(urlRepository.findByCode).mockResolvedValue({ id: 1 });
+
+            // act & assert
+            await expect(urlService.createShortUrl('https://example.com', 'abc123'))
+                .rejects.toThrow('短碼已存在');
+        });
     });
-
-    it('當短碼已存在時，應該拋出錯誤', async () => {
-      // arrange
-      vi.mocked(urlRepository.findByCode).mockResolvedValue({ id: 1 });
-
-      // act & assert
-      await expect(urlService.createShortUrl('https://example.com', 'abc123'))
-        .rejects.toThrow('短碼已存在');
-    });
-  });
 });
 ```
 
@@ -325,6 +336,10 @@ describe('url-service', () => {
 - 所有 API 路由必須套用 **rate limit middleware**（使用 `express-rate-limit`），防止濫用與暴力攻擊。
 - 使用 **helmet** 管理 HTTP 安全 headers，統一在 `src/app.ts` 中初始化。
 - CORS 設定統一在 `src/app.ts` 中管理，不得在個別路由自行設定。
+- 2FA secret 不得以明文儲存，必須使用 **AES-256-GCM** 加密（金鑰從環境變數讀取），將 `encrypted`、`iv`、`authTag` 一併存入資料庫。
+- Backup code 不得以明文儲存，必須使用 **bcrypt** hash 後再存入資料庫。
+- 2FA 驗證過程中，TOTP 短碼比對必須使用 `otplib` 提供的驗證方法，不得自行實作比對邏輯。
+- TOTP 短碼驗證成功後，必須將該短碼記錄至 Redis 並設定對應 TTL（建議至少 90 秒，以涵蓋 `otplib` 使用 `window=1` 時的有效窗口），防止同一短碼在有效期內被重複驗證（重放攻擊）。
 
 ---
 
