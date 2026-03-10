@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../src/services/admin/admin-stats-service', () => ({
+    getAdminStatsLinksService: vi.fn(),
     getAdminStatsUsersService: vi.fn(),
 }));
 
@@ -8,11 +9,12 @@ vi.mock('../../src/services/admin/admin-audit-log-service', () => ({
     recordAdminAuditLogService: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { getAdminStatsUsers } from '../../src/controllers/admin-stats-controllers';
+import { getAdminStatsLinks, getAdminStatsUsers } from '../../src/controllers/admin-stats-controllers';
 import { errorHandler } from '../../src/middlewares/error/error-handler';
 import { logger } from '../../src/lib/logger';
-import { getAdminStatsUsersService } from '../../src/services/admin/admin-stats-service';
+import { getAdminStatsLinksService, getAdminStatsUsersService } from '../../src/services/admin/admin-stats-service';
 
+const mockedGetAdminStatsLinksService = vi.mocked(getAdminStatsLinksService);
 const mockedGetAdminStatsUsersService = vi.mocked(getAdminStatsUsersService);
 
 const buildRes = () => {
@@ -43,6 +45,21 @@ describe('admin-stats-controllers', () => {
         await getAdminStatsUsers(req, res as never, next);
     };
 
+    const invokeLinksWithErrorHandler = async (
+        req: never,
+        res: ReturnType<typeof buildRes>,
+    ): Promise<void> => {
+        const next = (err?: unknown): void => {
+            if (!err) {
+                return;
+            }
+
+            errorHandler(err, req, res as never, vi.fn());
+        };
+
+        await getAdminStatsLinks(req, res as never, next);
+    };
+
     it('should return 200 when service succeeds', async () => {
         mockedGetAdminStatsUsersService.mockResolvedValue({
             daily: Array.from({ length: 7 }, (_, index) => ({
@@ -67,6 +84,40 @@ describe('admin-stats-controllers', () => {
         const res = buildRes();
 
         await invokeWithErrorHandler(req, res);
+
+        expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    it('should return 200 when get admin stats links succeeds', async () => {
+        mockedGetAdminStatsLinksService.mockResolvedValue({
+            summary: {
+                totalLinks: 320,
+                byStatus: {
+                    active: 210,
+                    expired: 60,
+                    disabled: 30,
+                    deleted: 20,
+                },
+                newLinksToday: 8,
+            },
+            dailyClicks: Array.from({ length: 7 }, (_, index) => ({
+                date: `2026-03-0${index + 4}`,
+                clicks: index * 10,
+            })),
+            topReferers: [{ domain: 'google.com', clicks: 430 }],
+            byDeviceType: [{ deviceType: 'desktop', clicks: 800 }],
+            byCountry: [{ countryCode: 'TW', clicks: 900 }],
+        });
+
+        const req = {
+            user: { id: 1, role: 'admin' },
+            originalUrl: '/admin/stats/links',
+            ip: '1.1.1.1',
+            get: vi.fn().mockReturnValue('ua'),
+        } as never;
+        const res = buildRes();
+
+        await invokeLinksWithErrorHandler(req, res);
 
         expect(res.status).toHaveBeenCalledWith(200);
     });

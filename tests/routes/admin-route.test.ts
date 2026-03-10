@@ -5,6 +5,9 @@ import { invokeRouter } from '../helpers/router-request';
 const getAdminStatsUsers = vi.fn((_req: Request, res: Response) => {
     res.status(200).json({ ok: true });
 });
+const getAdminStatsLinks = vi.fn((_req: Request, res: Response) => {
+    res.status(200).json({ ok: true });
+});
 const getAdminLinks = vi.fn((_req: Request, res: Response) => {
     res.status(200).json({ ok: true });
 });
@@ -24,6 +27,7 @@ const restoreAdminLinks = vi.fn((_req: Request, res: Response) => {
 const passThrough = (_req: Request, _res: Response, next: NextFunction): void => next();
 
 vi.mock('../../src/controllers/admin-stats-controllers', () => ({
+    getAdminStatsLinks,
     getAdminStatsUsers,
 }));
 
@@ -90,6 +94,16 @@ describe('admin-route integration', () => {
 
         expect(response.statusCode).toBe(200);
         expect(getAdminStatsUsers).toHaveBeenCalled();
+    });
+
+    it('should route GET /stats/links to controller', async () => {
+        const response = await invokeRouter(router, {
+            method: 'GET',
+            url: '/stats/links',
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(getAdminStatsLinks).toHaveBeenCalled();
     });
 
     it('should route GET /links/:id to detail controller', async () => {

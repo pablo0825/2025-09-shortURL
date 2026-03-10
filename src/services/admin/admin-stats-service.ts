@@ -1,9 +1,15 @@
 import { AppError } from '../../utils/app-error';
 import {
+    getClicksByCountry,
+    getClicksByDeviceType,
     getActiveUsersTwoFaStats,
+    getDailyClicks,
     getDailyActiveUsers,
     getDailyLinkCreators,
     getDailyNewUsers,
+    getLinkStatusSummary,
+    getNewLinksCount,
+    getTopReferers,
     getWeeklyActiveUsers,
     getWeeklyDeactivatedUsers,
 } from '../../repositories/admin/stats-admin-repository';
@@ -22,6 +28,37 @@ interface AdminUsersStatsResult {
         twoFaRate: number;
         deactivatedThisWeek: number;
     };
+}
+
+interface DailyLinksStatsItem {
+    date: string;
+    clicks: number;
+}
+
+interface AdminLinksStatsResult {
+    summary: {
+        totalLinks: number;
+        byStatus: {
+            active: number;
+            expired: number;
+            disabled: number;
+            deleted: number;
+        };
+        newLinksToday: number;
+    };
+    dailyClicks: DailyLinksStatsItem[];
+    topReferers: Array<{
+        domain: string;
+        clicks: number;
+    }>;
+    byDeviceType: Array<{
+        deviceType: 'desktop' | 'mobile' | 'tablet' | 'bot' | 'unknown';
+        clicks: number;
+    }>;
+    byCountry: Array<{
+        countryCode: string;
+        clicks: number;
+    }>;
 }
 
 const wrapServiceError = (context: string, error: unknown): AppError => {
@@ -105,5 +142,60 @@ export const getAdminStatsUsersService = async (): Promise<AdminUsersStatsResult
         };
     } catch (error) {
         throw wrapServiceError('adminStatsService.getAdminStatsUsers', error);
+    }
+};
+
+export const getAdminStatsLinksService = async (): Promise<AdminLinksStatsResult> => {
+    try {
+        const { startAt, endExclusive } = getUtcWindow();
+        const startAtIso = startAt.toISOString();
+        const endExclusiveIso = endExclusive.toISOString();
+        const todayStartAtIso = new Date(endExclusive.getTime() - 24 * 60 * 60 * 1000).toISOString();
+
+        const [linkStatusSummary, newLinksToday, dailyClicks, topReferers, byDeviceType, byCountry] =
+            await Promise.all([
+                getLinkStatusSummary(),
+                getNewLinksCount(todayStartAtIso, endExclusiveIso),
+                getDailyClicks(startAtIso, endExclusiveIso),
+                getTopReferers(startAtIso, endExclusiveIso),
+                getClicksByDeviceType(startAtIso, endExclusiveIso),
+                getClicksByCountry(startAtIso, endExclusiveIso),
+            ]);
+
+        const dailyClicksMap = dailyClicks.reduce((map, row) => {
+            map.set(row.date, row.clicks);
+            return map;
+        }, new Map<string, number>());
+
+        return {
+            summary: {
+                totalLinks: linkStatusSummary.total_links,
+                byStatus: {
+                    active: linkStatusSummary.active_links,
+                    expired: linkStatusSummary.expired_links,
+                    disabled: linkStatusSummary.disabled_links,
+                    deleted: linkStatusSummary.deleted_links,
+                },
+                newLinksToday,
+            },
+            dailyClicks: buildDailyDates(startAt).map((date) => ({
+                date,
+                clicks: dailyClicksMap.get(date) ?? 0,
+            })),
+            topReferers: topReferers.map((row) => ({
+                domain: row.value,
+                clicks: row.clicks,
+            })),
+            byDeviceType: byDeviceType.map((row) => ({
+                deviceType: row.value,
+                clicks: row.clicks,
+            })),
+            byCountry: byCountry.map((row) => ({
+                countryCode: row.value,
+                clicks: row.clicks,
+            })),
+        };
+    } catch (error) {
+        throw wrapServiceError('adminStatsService.getAdminStatsLinks', error);
     }
 };
