@@ -19,7 +19,7 @@ import {
 } from '../../repositories/admin/link-admin-repository';
 
 const SHORT_BASE_URL = process.env.SHORT_BASE_URL?.replace(/\/+$/, '') || 'http://localhost:3001';
-const LINK_NOT_FOUND_MESSAGE = '找不到連結';
+const LINK_NOT_FOUND_MESSAGE = '查無資料';
 const LINK_ALREADY_DELETED_MESSAGE = '連結已刪除';
 const LINK_ALREADY_DISABLED_MESSAGE = '連結已停用';
 type LinkStatus = 'active' | 'expired' | 'disabled' | 'deleted';

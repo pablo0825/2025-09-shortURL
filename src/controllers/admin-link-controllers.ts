@@ -20,10 +20,10 @@ import { AuditRequestMethod, AuditStatus, AuditTargetType } from '../enum/audit'
 import { recordAdminAuditLogService } from '../services/admin/admin-audit-log-service';
 import { logger } from '../lib/logger';
 
-const UNAUTHORIZED_MESSAGE = '未授權';
-const FORBIDDEN_MESSAGE = '禁止存取';
-const INVALID_QUERY_MESSAGE = '請求參數不正確';
-const NOT_FOUND_MESSAGE = '找不到連結';
+const UNAUTHORIZED_MESSAGE = '未登入';
+const FORBIDDEN_MESSAGE = '權限不足';
+const INVALID_QUERY_MESSAGE = '參數格式有誤';
+const NOT_FOUND_MESSAGE = '查無資料';
 const ALL_LINKS_DELETE_FAILED_MESSAGE = '所有連結皆無法刪除';
 
 const ALL_LINKS_RESTORE_FAILED_MESSAGE = 'All links failed to restore';
