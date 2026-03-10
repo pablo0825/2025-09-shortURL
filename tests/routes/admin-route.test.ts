@@ -25,6 +25,16 @@ const restoreAdminLinks = vi.fn((_req: Request, res: Response) => {
 });
 
 const passThrough = (_req: Request, _res: Response, next: NextFunction): void => next();
+const checkPermission = vi.fn(
+    (_resource: string, _action: string) =>
+        (req: Request, res: Response, next: NextFunction): void => {
+            if (req.headers['x-deny'] === '1') {
+                res.status(403).json({ ok: false, error: 'Forbidden' });
+                return;
+            }
+            next();
+        },
+);
 
 vi.mock('../../src/controllers/admin-stats-controllers', () => ({
     getAdminStatsLinks,
@@ -37,6 +47,10 @@ vi.mock('../../src/controllers/admin-link-controllers', () => ({
     getAdminLinkById,
     getAdminLinks,
     restoreAdminLinks,
+}));
+
+vi.mock('../../src/middlewares/auth/check-permission', () => ({
+    checkPermission,
 }));
 
 vi.mock('../../src/middlewares/auth/authenticate-tokens', () => ({
@@ -155,5 +169,16 @@ describe('admin-route integration', () => {
 
         expect(response.statusCode).toBe(401);
         expect(deactivateAdminLinkById).not.toHaveBeenCalled();
+    });
+
+    it('should stop at permission middleware when forbidden', async () => {
+        const response = await invokeRouter(router, {
+            method: 'GET',
+            url: '/stats/links',
+            headers: { 'x-deny': '1' },
+        });
+
+        expect(response.statusCode).toBe(403);
+        expect(getAdminStatsLinks).not.toHaveBeenCalled();
     });
 });
