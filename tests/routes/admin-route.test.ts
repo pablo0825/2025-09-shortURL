@@ -8,6 +8,39 @@ const getAdminStatsUsers = vi.fn((_req: Request, res: Response) => {
 const getAdminStatsLinks = vi.fn((_req: Request, res: Response) => {
     res.status(200).json({ ok: true });
 });
+const getUsers = vi.fn((_req: Request, res: Response) => {
+    res.status(200).json({ ok: true });
+});
+const getUser = vi.fn((_req: Request, res: Response) => {
+    res.status(200).json({ ok: true });
+});
+const getUserSessions = vi.fn((_req: Request, res: Response) => {
+    res.status(200).json({ ok: true });
+});
+const resetUser2FA = vi.fn((_req: Request, res: Response) => {
+    res.status(200).json({ ok: true });
+});
+const deactivateUser = vi.fn((_req: Request, res: Response) => {
+    res.status(200).json({ ok: true });
+});
+const restoreUser = vi.fn((_req: Request, res: Response) => {
+    res.status(200).json({ ok: true });
+});
+const setUserRole = vi.fn((_req: Request, res: Response) => {
+    res.status(200).json({ ok: true });
+});
+const getRoles = vi.fn((_req: Request, res: Response) => {
+    res.status(200).json({ ok: true });
+});
+const getRolePermissions = vi.fn((_req: Request, res: Response) => {
+    res.status(200).json({ ok: true });
+});
+const getRolePermissionsTree = vi.fn((_req: Request, res: Response) => {
+    res.status(200).json({ ok: true });
+});
+const manageRolePermissions = vi.fn((_req: Request, res: Response) => {
+    res.status(200).json({ ok: true });
+});
 const getAdminLinks = vi.fn((_req: Request, res: Response) => {
     res.status(200).json({ ok: true });
 });
@@ -39,6 +72,23 @@ const checkPermission = vi.fn(
 vi.mock('../../src/controllers/admin-stats-controllers', () => ({
     getAdminStatsLinks,
     getAdminStatsUsers,
+}));
+
+vi.mock('../../src/controllers/admin-user-controllers', () => ({
+    deactivateUser,
+    getUser,
+    getUsers,
+    getUserSessions,
+    resetUser2FA,
+    restoreUser,
+    setUserRole,
+}));
+
+vi.mock('../../src/controllers/admin-role-controllers', () => ({
+    getRolePermissions,
+    getRolePermissionsTree,
+    getRoles,
+    manageRolePermissions,
 }));
 
 vi.mock('../../src/controllers/admin-link-controllers', () => ({
@@ -118,6 +168,116 @@ describe('admin-route integration', () => {
 
         expect(response.statusCode).toBe(200);
         expect(getAdminStatsLinks).toHaveBeenCalled();
+    });
+
+    it('should route GET /users to controller', async () => {
+        const response = await invokeRouter(router, {
+            method: 'GET',
+            url: '/users?page=1&limit=20&sortBy=created_at&sortOrder=desc',
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(getUsers).toHaveBeenCalled();
+    });
+
+    it('should route GET /user/:id to controller', async () => {
+        const response = await invokeRouter(router, {
+            method: 'GET',
+            url: '/user/2',
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(getUser).toHaveBeenCalled();
+    });
+
+    it('should route GET /user/:id/sessions to controller', async () => {
+        const response = await invokeRouter(router, {
+            method: 'GET',
+            url: '/user/2/sessions',
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(getUserSessions).toHaveBeenCalled();
+    });
+
+    it('should route PATCH /user/:id/reset-2fa to controller', async () => {
+        const response = await invokeRouter(router, {
+            method: 'PATCH',
+            url: '/user/2/reset-2fa',
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(resetUser2FA).toHaveBeenCalled();
+    });
+
+    it('should route PATCH /user/:id/deactivate to controller', async () => {
+        const response = await invokeRouter(router, {
+            method: 'PATCH',
+            url: '/user/2/deactivate',
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(deactivateUser).toHaveBeenCalled();
+    });
+
+    it('should route PATCH /user/:id/restore to controller', async () => {
+        const response = await invokeRouter(router, {
+            method: 'PATCH',
+            url: '/user/3/restore',
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(restoreUser).toHaveBeenCalled();
+    });
+
+    it('should route PUT /users/:id/role to controller', async () => {
+        const response = await invokeRouter(router, {
+            method: 'PUT',
+            url: '/users/2/role',
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(setUserRole).toHaveBeenCalled();
+    });
+
+    it('should route GET /roles to controller', async () => {
+        const response = await invokeRouter(router, {
+            method: 'GET',
+            url: '/roles',
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(getRoles).toHaveBeenCalled();
+    });
+
+    it('should route GET /roles/:roleId/permissions to controller', async () => {
+        const response = await invokeRouter(router, {
+            method: 'GET',
+            url: '/roles/2/permissions',
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(getRolePermissions).toHaveBeenCalled();
+    });
+
+    it('should route GET /roles/:roleId/permissions/tree to controller', async () => {
+        const response = await invokeRouter(router, {
+            method: 'GET',
+            url: '/roles/2/permissions/tree',
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(getRolePermissionsTree).toHaveBeenCalled();
+    });
+
+    it('should route PATCH /roles/:roleId/permissions to controller', async () => {
+        const response = await invokeRouter(router, {
+            method: 'PATCH',
+            url: '/roles/2/permissions',
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(manageRolePermissions).toHaveBeenCalled();
     });
 
     it('should route GET /links/:id to detail controller', async () => {
