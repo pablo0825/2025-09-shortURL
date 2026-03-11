@@ -1,5 +1,5 @@
 import { pool } from '../../db/pool';
-import { withTransaction } from '../auth/auth-repository';
+import { withTransaction } from '../../db/transaction';
 
 export interface SessionRow {
     id: number;
