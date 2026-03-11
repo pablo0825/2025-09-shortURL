@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { pool } from '../db/pool';
+import { deactivateExpiredLinks } from '../repositories/link/link-repository';
 import { linkTasksToCacheTask } from './link-tasks-to-cache-task';
 import { deleteCheckForDisabledLinks } from './delete-check-for-disabled-links-task';
 import { logger } from '../lib/logger';
@@ -10,10 +10,8 @@ cron.schedule(
     async () => {
         try {
             logger.info(`[CRON-01] 運行把過期的link停用的任務...`);
-            const result = await pool.query(
-                'UPDATE links SET is_active = FALSE WHERE expire_at < now() AND is_active = TRUE;',
-            );
-            logger.info(`[CRON-01] 已停用過期 links：${result.rowCount} 筆`);
+            const result = await deactivateExpiredLinks();
+            logger.info(`[CRON-01] 已停用過期 links：${result} 筆`);
         } catch (err) {
             logger.error('[CRON-01] 更新過期 link 失敗:', err);
         }

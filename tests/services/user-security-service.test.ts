@@ -226,7 +226,7 @@ describe('user-security-service', () => {
                 { userId: 7, userName: 'u', ip: null, userAgent: null },
                 { fileBuffer: Buffer.from('raw') },
             ),
-        ).rejects.toMatchObject({ name: 'UserNotFoundError' });
+        ).rejects.toMatchObject({ name: 'AppError', statusCode: 404 });
 
         expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
         expect(unlinkMock).toHaveBeenCalledWith(
@@ -293,7 +293,7 @@ describe('user-security-service', () => {
                 ip: null,
                 userAgent: null,
             }),
-        ).rejects.toMatchObject({ name: 'UserNotFoundError' });
+        ).rejects.toMatchObject({ name: 'AppError', statusCode: 404 });
 
         expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
     });
@@ -312,7 +312,7 @@ describe('user-security-service', () => {
                 ip: null,
                 userAgent: null,
             }),
-        ).rejects.toMatchObject({ name: 'UserNotFoundError' });
+        ).rejects.toMatchObject({ name: 'AppError', statusCode: 404 });
 
         expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
     });
@@ -327,7 +327,7 @@ describe('user-security-service', () => {
                 { userId: 7, userName: 'u', ip: null, userAgent: null },
                 'a@example.com',
             ),
-        ).rejects.toMatchObject({ name: 'TwofaQrGenerationError' });
+        ).rejects.toMatchObject({ name: 'AppError', statusCode: 500 });
     });
 
     it('should throw TwofaCacheWriteError when cache write fails', async () => {
@@ -346,7 +346,7 @@ describe('user-security-service', () => {
                 { userId: 7, userName: 'u', ip: null, userAgent: null },
                 'a@example.com',
             ),
-        ).rejects.toMatchObject({ name: 'TwofaCacheWriteError' });
+        ).rejects.toMatchObject({ name: 'AppError', statusCode: 503 });
     });
 
     it('should throw PendingTwofaExpiredError when pending 2fa is missing', async () => {
@@ -357,7 +357,7 @@ describe('user-security-service', () => {
                 { userId: 9, userName: 'u', ip: null, userAgent: null },
                 { code: '123456', nonce: 'nonce' },
             ),
-        ).rejects.toMatchObject({ name: 'PendingTwofaExpiredError' });
+        ).rejects.toMatchObject({ name: 'AppError', statusCode: 400 });
     });
 
     it('should throw TwofaCacheReadError when cache read fails', async () => {
@@ -368,7 +368,7 @@ describe('user-security-service', () => {
                 { userId: 9, userName: 'u', ip: null, userAgent: null },
                 { code: '123456', nonce: 'nonce' },
             ),
-        ).rejects.toMatchObject({ name: 'TwofaCacheReadError' });
+        ).rejects.toMatchObject({ name: 'AppError', statusCode: 503 });
     });
 
     it('should throw InvalidTwofaPayloadError when pending 2fa payload is invalid json', async () => {
@@ -379,7 +379,7 @@ describe('user-security-service', () => {
                 { userId: 9, userName: 'u', ip: null, userAgent: null },
                 { code: '123456', nonce: 'nonce' },
             ),
-        ).rejects.toMatchObject({ name: 'InvalidTwofaPayloadError' });
+        ).rejects.toMatchObject({ name: 'AppError', statusCode: 400 });
     });
 
     it('should throw InvalidTwofaCodeError when totp code is invalid', async () => {
@@ -398,7 +398,7 @@ describe('user-security-service', () => {
                 { userId: 9, userName: 'u', ip: null, userAgent: null },
                 { code: '123456', nonce: 'nonce' },
             ),
-        ).rejects.toMatchObject({ name: 'InvalidTwofaCodeError' });
+        ).rejects.toMatchObject({ name: 'AppError', statusCode: 400 });
     });
 
     it('should enable 2fa successfully', async () => {
@@ -445,7 +445,7 @@ describe('user-security-service', () => {
                 { userId: 9, userName: 'u', ip: null, userAgent: null },
                 { code: '123456', nonce: 'nonce' },
             ),
-        ).rejects.toMatchObject({ name: 'UserNotFoundError' });
+        ).rejects.toMatchObject({ name: 'AppError', statusCode: 404 });
 
         expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
     });
@@ -484,7 +484,7 @@ describe('user-security-service', () => {
 
         await expect(
             disable2faService({ userId: 9, userName: 'u', ip: null, userAgent: null }, null),
-        ).rejects.toMatchObject({ name: 'UserNotFoundError' });
+        ).rejects.toMatchObject({ name: 'AppError', statusCode: 404 });
 
         expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
     });
@@ -510,7 +510,7 @@ describe('user-security-service', () => {
                 { userId: 3, userName: 'u', ip: '1.1.1.1', userAgent: 'ua' },
                 null,
             ),
-        ).rejects.toMatchObject({ name: 'UserNotFoundError' });
+        ).rejects.toMatchObject({ name: 'AppError', statusCode: 404 });
     });
 
     it('should wrap rollback failure when soft-deleting account', async () => {

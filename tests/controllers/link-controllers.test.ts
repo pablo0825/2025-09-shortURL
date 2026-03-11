@@ -58,6 +58,7 @@ describe('link-controllers', () => {
         const req = {
             body: { longUrl: 'https://example.com' },
             ip: '1.1.1.1',
+            user: { id: 'user-1', email: 'a@a.com', name: 'A', role: 'user' },
             get: vi.fn(),
             originalUrl: '/api/link',
         } as never;
@@ -67,7 +68,7 @@ describe('link-controllers', () => {
         await createShortUrl(req, res as never, next);
 
         expect(res.status).toHaveBeenCalledWith(201);
-        expect(mockedCreateShortUrlService).toHaveBeenCalledWith('https://example.com/', '1.1.1.1');
+        expect(mockedCreateShortUrlService).toHaveBeenCalledWith('https://example.com/', '1.1.1.1', 'user-1');
         expect(next).not.toHaveBeenCalled();
     });
 
@@ -93,6 +94,7 @@ describe('link-controllers', () => {
         const req = {
             body: { longUrl: 'https://example.com' },
             ip: '1.1.1.1',
+            user: { id: 'user-1', email: 'a@a.com', name: 'A', role: 'user' },
         } as never;
         const res = buildRes();
         const next = buildNext();
@@ -144,6 +146,7 @@ describe('link-controllers', () => {
 
         const req = {
             query: {},
+            user: { id: 'user-1', email: 'a@a.com', name: 'A', role: 'user' },
         } as never;
         const res = buildRes();
         const next = buildNext();
@@ -156,6 +159,7 @@ describe('link-controllers', () => {
             pageSize: 30,
             includeExpired: false,
             includeInactive: false,
+            userId: 'user-1',
         });
         expect(next).not.toHaveBeenCalled();
     });
@@ -183,6 +187,7 @@ describe('link-controllers', () => {
 
         const req = {
             query: {},
+            user: { id: 'user-1', email: 'a@a.com', name: 'A', role: 'user' },
         } as never;
         const res = buildRes();
         const next = buildNext();

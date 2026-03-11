@@ -45,7 +45,6 @@ import {
     cacheIsOpen,
     cacheSendCommand,
     cacheSet,
-    cacheSetNoTtl,
     cacheSetMembers,
     cacheTtl,
 } from '../../src/lib/cache';
@@ -96,11 +95,6 @@ describe('cache', () => {
     it('should delete a cache key', async () => {
         await cacheDel('key-1');
         expect(mockRedisClient.del).toHaveBeenCalledWith('key-1');
-    });
-
-    it('should set cache without ttl', async () => {
-        await cacheSetNoTtl('key-1', 'value-1');
-        expect(mockRedisClient.set).toHaveBeenCalledWith('key-1', 'value-1');
     });
 
     it('should increment cache key', async () => {

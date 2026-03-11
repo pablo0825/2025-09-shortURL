@@ -111,6 +111,7 @@ export async function linkTasksToCacheTask() {
                         'UPDATE link_task SET status = $1, processed_at = now(), locked_at = NULL, locked_by = NULL WHERE id = $2 AND status = $3',
                         ['done', id, 'processing'],
                     );
+                    continue;
                 }
                 // [風險] 沒有檢驗url是否合法，如果有人竄改link_task的資料，就無法防禦有問題的url
                 const url = String(long_url);

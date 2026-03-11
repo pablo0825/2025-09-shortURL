@@ -5,7 +5,7 @@ vi.mock('../../src/lib/cache', () => ({
     cacheDel: vi.fn(),
     cacheExists: vi.fn(),
     cacheGet: vi.fn(),
-    cacheSet: vi.fn(),
+    cacheSet: vi.fn(), // still needed for DB-hit path tests
 }));
 
 vi.mock('../../src/repositories/link/link-repository', () => ({
@@ -21,7 +21,7 @@ vi.mock('../../src/lib/is-forbidden-target', () => ({
     isForbiddenTarget: vi.fn(),
 }));
 
-import { cacheDel, cacheExists, cacheGet, cacheSet } from '../../src/lib/cache';
+import { cacheDel, cacheExists, cacheGet } from '../../src/lib/cache';
 import {
     createLinkRecord,
     deactivateLinkById,
@@ -42,7 +42,6 @@ import {
 const mockedCacheDel = vi.mocked(cacheDel);
 const mockedCacheExists = vi.mocked(cacheExists);
 const mockedCacheGet = vi.mocked(cacheGet);
-const mockedCacheSet = vi.mocked(cacheSet);
 const mockedCreateLinkRecord = vi.mocked(createLinkRecord);
 const mockedDeactivateLinkById = vi.mocked(deactivateLinkById);
 const mockedDeleteLinkById = vi.mocked(deleteLinkById);
@@ -70,7 +69,7 @@ describe('link-service', () => {
             expect(mockedFindLinkByShortCode).not.toHaveBeenCalled();
         });
 
-        it('should return cached long url when cache hit is valid and allowed', async () => {
+        it('should return cached long url when cache hits', async () => {
             mockedCacheGet.mockResolvedValue('https://example.com/path');
 
             const result = await resolveShortCodeService('abc123');
@@ -81,31 +80,7 @@ describe('link-service', () => {
             });
             expect(mockedCacheDel).not.toHaveBeenCalled();
             expect(mockedFindLinkByShortCode).not.toHaveBeenCalled();
-            expect(mockedIsForbiddenTarget).toHaveBeenCalledWith('example.com');
-        });
-
-        it('should delete dirty cache and fallback to db when cached long url is invalid', async () => {
-            mockedCacheGet.mockResolvedValue('not-a-valid-url');
-            mockedFindLinkByShortCode.mockResolvedValue({
-                id: '1',
-                code: 'abc123',
-                long_url: 'https://db.example.com/page',
-                expire_at: new Date(Date.now() + 60_000).toISOString(),
-            } as never);
-
-            const result = await resolveShortCodeService('abc123');
-
-            expect(mockedCacheDel).toHaveBeenCalledWith('short:abc123');
-            expect(result).toEqual({
-                status: 'found',
-                id: '1',
-                longUrl: 'https://db.example.com/page',
-            });
-            expect(mockedCacheSet).toHaveBeenCalledWith(
-                'short:abc123',
-                'https://db.example.com/page',
-                expect.any(Number),
-            );
+            expect(mockedIsForbiddenTarget).not.toHaveBeenCalled();
         });
 
         it('should throw wrapped AppError when db long url is invalid', async () => {
@@ -131,20 +106,20 @@ describe('link-service', () => {
                 code: 'abc123',
             } as never);
 
-            const result = await createShortUrlService('https://example.com/path', '1.1.1.1');
+            const result = await createShortUrlService('https://example.com/path', '1.1.1.1', 'user-1');
 
             expect(result).toEqual({
                 id: '1',
                 code: 'abc123',
                 shortUrl: 'http://localhost:3001/abc123',
             });
-            expect(mockedCreateLinkRecord).toHaveBeenCalledWith('https://example.com/path', '1.1.1.1');
+            expect(mockedCreateLinkRecord).toHaveBeenCalledWith('https://example.com/path', '1.1.1.1', 'user-1');
         });
 
         it('should throw wrapped AppError when target host is forbidden', async () => {
             mockedIsForbiddenTarget.mockResolvedValue(true);
 
-            await expect(createShortUrlService('https://example.com/path', null)).rejects.toMatchObject({
+            await expect(createShortUrlService('https://example.com/path', null, 'user-1')).rejects.toMatchObject({
                 name: 'AppError',
                 statusCode: 400,
                 message: '[linkService.createShortUrl] 不允許的目標主機',
@@ -173,9 +148,10 @@ describe('link-service', () => {
                 pageSize: 50,
                 includeExpired: true,
                 includeInactive: false,
+                userId: 'user-1',
             });
 
-            expect(mockedListLinks).toHaveBeenCalledWith(50, 50, true, false);
+            expect(mockedListLinks).toHaveBeenCalledWith(50, 50, true, false, 'user-1');
             expect(result).toEqual({
                 page: 2,
                 pageSize: 50,

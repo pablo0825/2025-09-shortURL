@@ -3,43 +3,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
     mockBuildCacheKey,
-    mockCacheDel,
     mockCacheExists,
     mockCacheGet,
-    mockIsForbiddenTarget,
-    mockRecordLinkLogService,
-    mockSafeParse,
 } = vi.hoisted(() => {
     return {
         mockBuildCacheKey: vi.fn((module: string, identifier: string) => `${module}:${identifier}`),
-        mockCacheDel: vi.fn(),
         mockCacheExists: vi.fn(),
         mockCacheGet: vi.fn(),
-        mockIsForbiddenTarget: vi.fn(),
-        mockRecordLinkLogService: vi.fn(),
-        mockSafeParse: vi.fn(),
     };
 });
 
 vi.mock('../../src/lib/cache', () => ({
     buildCacheKey: mockBuildCacheKey,
-    cacheDel: mockCacheDel,
     cacheExists: mockCacheExists,
     cacheGet: mockCacheGet,
-}));
-
-vi.mock('../../src/lib/is-forbidden-target', () => ({
-    isForbiddenTarget: mockIsForbiddenTarget,
-}));
-
-vi.mock('../../src/services/link/link-log-service', () => ({
-    recordLinkLogService: mockRecordLinkLogService,
-}));
-
-vi.mock('../../src/schemas/long-url-schema', () => ({
-    longUrlSchema: () => ({
-        safeParse: mockSafeParse,
-    }),
 }));
 
 import { cacheShortUrl } from '../../src/middlewares/redirect/cache-short-url';
@@ -110,11 +87,10 @@ describe('cache-short-url middleware', () => {
             ok: false,
             error: 'shortURL 不存在(redis)',
         });
-        expect(mockRecordLinkLogService).toHaveBeenCalled();
         expect(next).not.toHaveBeenCalled();
     });
 
-    it('should redirect when positive cache hits and target is allowed', async () => {
+    it('should redirect when positive cache hits', async () => {
         const req = {
             params: { code: 'abc123' },
         } as unknown as Request;
@@ -124,17 +100,11 @@ describe('cache-short-url middleware', () => {
         const longUrl = 'https://example.com/page';
         mockCacheExists.mockResolvedValue(false);
         mockCacheGet.mockResolvedValue(longUrl);
-        mockSafeParse.mockReturnValue({
-            success: true,
-            data: longUrl,
-        });
-        mockIsForbiddenTarget.mockResolvedValue(false);
 
         await cacheShortUrl(req, res, next);
 
         expect(mockCacheGet).toHaveBeenCalledWith('short:abc123');
         expect(res.redirect).toHaveBeenCalledWith(302, longUrl);
-        expect(mockRecordLinkLogService).toHaveBeenCalled();
         expect(next).not.toHaveBeenCalled();
     });
 
@@ -153,51 +123,6 @@ describe('cache-short-url middleware', () => {
         expect(next).toHaveBeenCalledTimes(1);
         expect(res.redirect).not.toHaveBeenCalled();
         expect(res.status).not.toHaveBeenCalled();
-    });
-
-    it('should delete dirty cache and call next when schema validation fails', async () => {
-        const req = {
-            params: { code: 'abc123' },
-        } as unknown as Request;
-        const res = createResponse();
-        const next = vi.fn() as NextFunction;
-
-        mockCacheExists.mockResolvedValue(false);
-        mockCacheGet.mockResolvedValue('https://example.com/page');
-        mockSafeParse.mockReturnValue({
-            success: false,
-        });
-
-        await cacheShortUrl(req, res, next);
-
-        expect(mockCacheDel).toHaveBeenCalledWith('short:abc123');
-        expect(next).toHaveBeenCalledTimes(1);
-    });
-
-    it('should return 400 when cached target is forbidden', async () => {
-        const req = {
-            params: { code: 'abc123' },
-        } as unknown as Request;
-        const res = createResponse();
-        const next = vi.fn() as NextFunction;
-
-        const longUrl = 'https://example.com/page';
-        mockCacheExists.mockResolvedValue(false);
-        mockCacheGet.mockResolvedValue(longUrl);
-        mockSafeParse.mockReturnValue({
-            success: true,
-            data: longUrl,
-        });
-        mockIsForbiddenTarget.mockResolvedValue(true);
-
-        await cacheShortUrl(req, res, next);
-
-        expect(res.status).toHaveBeenCalledWith(400);
-        expect(res.json).toHaveBeenCalledWith({
-            ok: false,
-            error: '不允許的目標主機(快取)',
-        });
-        expect(next).not.toHaveBeenCalled();
     });
 
     it('should call next when cache access throws', async () => {

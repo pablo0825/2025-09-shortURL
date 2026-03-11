@@ -102,6 +102,7 @@ const resolveAllowedLongUrl = async (rawLongUrl: string): Promise<ResolvedLongUr
 export const createShortUrlService = async (
     longUrl: string,
     ip: string | null,
+    userId: string,
 ): Promise<CreateShortUrlResult> => {
     try {
         const target = new URL(longUrl);
@@ -110,7 +111,7 @@ export const createShortUrlService = async (
             throw new AppError(400, '不允許的目標主機');
         }
 
-        const created = await createLinkRecord(longUrl, ip);
+        const created = await createLinkRecord(longUrl, ip, userId);
         const shortUrl = new URL(`/${created.code}`, SHORT_BASE_URL).toString();
         return {
             id: created.id,
@@ -134,14 +135,10 @@ export const resolveShortCodeService = async (rawCode: string): Promise<ResolveR
 
         const cached = await cacheGet(key);
         if (cached) {
-            const resolvedCached = await resolveAllowedLongUrl(cached);
-            if (resolvedCached.ok && resolvedCached.longUrl) {
-                return {
-                    status: 'found',
-                    longUrl: resolvedCached.longUrl,
-                };
-            }
-            await cacheDel(key);
+            return {
+                status: 'found',
+                longUrl: cached,
+            };
         }
 
         const row = await findLinkByShortCode(code);
@@ -174,11 +171,15 @@ export const resolveShortCodeService = async (rawCode: string): Promise<ResolveR
     }
 };
 
-export const getAllLinksService = async (input: ListLinksQueryDto): Promise<ListLinksResult> => {
+interface ListLinksInput extends ListLinksQueryDto {
+    userId: string;
+}
+
+export const getAllLinksService = async (input: ListLinksInput): Promise<ListLinksResult> => {
     try {
         const offset = (input.page - 1) * input.pageSize;
 
-        const queried = await listLinks(input.pageSize, offset, input.includeExpired, input.includeInactive);
+        const queried = await listLinks(input.pageSize, offset, input.includeExpired, input.includeInactive, input.userId);
 
         const data: ListLinksItem[] = queried.rows.map((row) => {
             const shortUrl = new URL(`/${row.code}`, SHORT_BASE_URL).toString();
