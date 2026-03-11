@@ -15,7 +15,7 @@ import { consumeBackupCodes } from '../../utils/backup-codes';
 import {
     consumeBackupCode,
     countRecentUserAction,
-    findActiveRefreshTokensByUserId,
+    findActiveRefreshTokenByJti,
     findActiveUserByEmail,
     findActiveUserById,
     findAvailableBackupCodeHashes,
@@ -134,13 +134,20 @@ const parseRefreshTokenExpiry = (refreshToken: string): { expiresAt: Date; maxAg
     };
 };
 
-const decodeRefreshUserId = (refreshToken: string): number => {
+const decodeRefreshClaims = (refreshToken: string): { userId: number; jti: string } => {
     const decoded = jwtAuthTool.verifyToken(refreshToken, 'refresh');
+    if (!decoded.ok || !decoded.claims) {
+        throw new AppError(401, 'Refresh Token 無效，請重新登入');
+    }
     const id = decoded.claims?.id;
+    const jti = decoded.claims?.jti;
     if (!id || Number.isNaN(Number(id))) {
         throw new AppError(401, 'Refresh Token 無效，請重新登入');
     }
-    return Number(id);
+    if (!jti) {
+        throw new AppError(401, 'Refresh Token 已過期，請重新登入');
+    }
+    return { userId: Number(id), jti };
 };
 
 export const registerService = async (input: RegisterInputDto): Promise<RegisterResult> => {
@@ -215,7 +222,7 @@ export const loginService = async (
             email: user.email,
             role,
         });
-        const refreshToken = jwtAuthTool.generateRefreshToken(user.id.toString());
+        const { token: refreshToken, jti } = jwtAuthTool.generateRefreshToken(user.id.toString());
         const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
         const { expiresAt, maxAge } = parseRefreshTokenExpiry(refreshToken);
 
@@ -238,6 +245,7 @@ export const loginService = async (
             await insertRefreshToken(
                 {
                     userId: user.id,
+                    jti,
                     refreshTokenHash,
                     userAgent: context.userAgent,
                     userIp: context.userIp,
@@ -333,7 +341,7 @@ export const login2faService = async (
             email: user.email,
             role: user.role_type,
         });
-        const refreshToken = jwtAuthTool.generateRefreshToken(userId.toString());
+        const { token: refreshToken, jti } = jwtAuthTool.generateRefreshToken(userId.toString());
         const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
         const { expiresAt, maxAge } = parseRefreshTokenExpiry(refreshToken);
 
@@ -356,6 +364,7 @@ export const login2faService = async (
             await insertRefreshToken(
                 {
                     userId,
+                    jti,
                     refreshTokenHash,
                     userAgent: context.userAgent,
                     userIp: context.userIp,
@@ -407,28 +416,21 @@ export const refreshService = async (
     context: AuthContext,
 ): Promise<RefreshSuccess> => {
     try {
-        const userId: number = decodeRefreshUserId(refreshToken);
+        const { userId, jti } = decodeRefreshClaims(refreshToken);
+
+        // O(1) lookup — outside transaction
+        const matched = await findActiveRefreshTokenByJti(jti);
+        if (!matched) {
+            throw new AppError(401, 'Refresh Token 已過期或不存在，請重新登入');
+        }
+
+        // Single bcrypt.compare — outside transaction
+        const isMatch = await bcrypt.compare(refreshToken, matched.refresh_token_hash);
+        if (!isMatch) {
+            throw new AppError(401, 'Refresh Token 無效，請重新登入');
+        }
 
         return await withTransaction(async (client) => {
-            const tokens = await findActiveRefreshTokensByUserId(userId, 10, client);
-            if (!tokens.length) {
-                throw new AppError(401, 'Refresh Token 已過期或不存在，請重新登入');
-            }
-
-            // (typeof tokens)[number] 的意思是，型別是從 tokens 取出的，並取出陣列元素的型別，如 tokens: string[]，型別就是字串陣列
-            let matched: (typeof tokens)[number] | null = null;
-            for (const token of tokens) {
-                const isMatch = await bcrypt.compare(refreshToken, token.refresh_token_hash);
-                if (isMatch) {
-                    matched = token;
-                    break;
-                }
-            }
-
-            if (!matched) {
-                throw new AppError(401, 'Refresh Token 無效，請重新登入');
-            }
-
             await revokeRefreshTokenById(matched.id, client);
 
             const user = await findActiveUserById(userId, client);
@@ -447,7 +449,7 @@ export const refreshService = async (
                 email: user.email,
                 role,
             });
-            const newRefreshToken = jwtAuthTool.generateRefreshToken(userId.toString());
+            const { token: newRefreshToken, jti: newJti } = jwtAuthTool.generateRefreshToken(userId.toString());
             const newRefreshTokenHash = await bcrypt.hash(newRefreshToken, 10);
             const { expiresAt, maxAge } = parseRefreshTokenExpiry(newRefreshToken);
 
@@ -471,6 +473,7 @@ export const refreshService = async (
             await insertRefreshToken(
                 {
                     userId,
+                    jti: newJti,
                     refreshTokenHash: newRefreshTokenHash,
                     userAgent: context.userAgent,
                     userIp: context.userIp,
@@ -502,27 +505,25 @@ export const refreshService = async (
 
 export const logoutService = async (refreshToken: string): Promise<LogoutResult> => {
     try {
-        const userId = decodeRefreshUserId(refreshToken);
+        let claims: { userId: number; jti: string };
+        try {
+            claims = decodeRefreshClaims(refreshToken);
+        } catch {
+            // Invalid token — treat as already logged out
+            return { success: true };
+        }
+
+        const matched = await findActiveRefreshTokenByJti(claims.jti);
+        if (!matched) {
+            return { success: true };
+        }
+
+        const isMatch = await bcrypt.compare(refreshToken, matched.refresh_token_hash);
+        if (!isMatch) {
+            return { success: true };
+        }
 
         await withTransaction(async (client) => {
-            const tokens = await findActiveRefreshTokensByUserId(userId, 10, client);
-            if (!tokens.length) {
-                return;
-            }
-
-            let matched: (typeof tokens)[number] | null = null;
-            for (const token of tokens) {
-                const isMatch = await bcrypt.compare(refreshToken, token.refresh_token_hash);
-                if (isMatch) {
-                    matched = token;
-                    break;
-                }
-            }
-
-            if (!matched) {
-                return;
-            }
-
             await revokeRefreshTokenById(matched.id, client);
             await revokeSessionById(matched.session_id, 'logout', client);
         });

@@ -149,6 +149,7 @@ export const insertSession = async (
 export const insertRefreshToken = async (
     params: {
         userId: number;
+        jti: string;
         refreshTokenHash: string;
         userAgent: string | null;
         userIp: string | undefined;
@@ -161,7 +162,7 @@ export const insertRefreshToken = async (
 ): Promise<void> => {
     const db = queryWithClient(client);
     await db.query(
-        'INSERT INTO refresh_token (user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at, session_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+        'INSERT INTO refresh_token (user_id, refresh_token_hash, user_agent, ip_address, expires_at, device_info, last_used_at, session_id, jti) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
         [
             params.userId,
             params.refreshTokenHash,
@@ -171,8 +172,21 @@ export const insertRefreshToken = async (
             params.deviceInfoText,
             params.lastUsedAt,
             params.sessionId,
+            params.jti,
         ],
     );
+};
+
+export const findActiveRefreshTokenByJti = async (
+    jti: string,
+    client?: PoolClient,
+): Promise<RefreshTokenRow | null> => {
+    const db = queryWithClient(client);
+    const result = await db.query<RefreshTokenRow>(
+        'SELECT id, refresh_token_hash, session_id FROM refresh_token WHERE jti = $1 AND expires_at > now() AND revoked_at IS NULL LIMIT 1',
+        [jti],
+    );
+    return result.rowCount ? result.rows[0] : null;
 };
 
 export const updateUserLastLoginAt = async (
