@@ -69,6 +69,7 @@ const encodeBase62 = (input: bigint): string => {
 export const createLinkRecord = async (
     longUrl: string,
     creatorIp: string | null,
+    creatorUserId: string,
 ): Promise<CreateLinkResult> => {
     let client: PoolClient | undefined;
 
@@ -77,8 +78,8 @@ export const createLinkRecord = async (
         await client.query('BEGIN');
 
         const created = await client.query<CreatedLinkRow>(
-            'INSERT INTO links (long_url, creator_ip) VALUES ($1, $2::INET) RETURNING id::text, long_url, expire_at',
-            [longUrl, creatorIp],
+            'INSERT INTO links (long_url, creator_ip, creator_user_id) VALUES ($1, $2::INET, $3::BIGINT) RETURNING id::text, long_url, expire_at',
+            [longUrl, creatorIp, creatorUserId],
         );
 
         const id = created.rows[0]?.id;
@@ -144,15 +145,17 @@ export const listLinks = async (
     offset: number,
     includeExpired: boolean,
     includeInactive: boolean,
+    userId: string,
 ): Promise<ListLinksResult> => {
     const result = await pool.query<LinkListRow>(
         `SELECT id::text, code, long_url, created_at, expire_at, is_active, COUNT(*) OVER() AS total_count
      FROM links
-     WHERE ($3::boolean OR expire_at > now())
+     WHERE creator_user_id = $5::BIGINT
+       AND ($3::boolean OR expire_at > now())
        AND ($4::boolean OR is_active = TRUE)
      ORDER BY created_at DESC
      LIMIT $1 OFFSET $2`,
-        [pageSize, offset, includeExpired, includeInactive],
+        [pageSize, offset, includeExpired, includeInactive, userId],
     );
 
     const total = result.rowCount ? Number(result.rows[0].total_count) : 0;
@@ -184,5 +187,12 @@ export const findLinkStateById = async (id: string): Promise<LinkStateRow | null
     [id],
   );
   return result.rowCount ? result.rows[0] : null;
+};
+
+export const deactivateExpiredLinks = async (): Promise<number> => {
+    const result = await pool.query(
+        'UPDATE links SET is_active = FALSE WHERE expire_at < now() AND is_active = TRUE',
+    );
+    return result.rowCount ?? 0;
 };
 

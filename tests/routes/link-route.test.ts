@@ -34,6 +34,10 @@ vi.mock('../../src/middlewares/auth/check-permission', () => ({
     checkPermission,
 }));
 
+vi.mock('../../src/middlewares/auth/authenticate-tokens', () => ({
+    authenticate: passThrough,
+}));
+
 vi.mock('../../src/middlewares/rate-limit/rate-limiter', () => ({
     getRateLimiters: () => ({
         generalApiLimiter: passThrough,

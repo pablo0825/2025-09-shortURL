@@ -13,7 +13,7 @@ import { generateTotpSecret, buildOtpAuthUrl, verifyTotpCode } from '../../utils
 import { toDataUrl } from '../../utils/qrcode';
 import { encrypt, decrypt } from '../../utils/crypto-utils';
 import { generateBackupCodes, hashBackupCodes } from '../../utils/backup-codes';
-import { AppError } from '../../utils/app-error';
+import { AppError, toAppError } from '../../utils/app-error';
 import { buildCacheKey, cacheDel, cacheGet, cacheSet } from '../../lib/cache';
 import {
     clearUserAvatarKey,
@@ -55,41 +55,6 @@ interface EnableTwofaResult {
 
 const AVATAR_SIZE = 512;
 const TWOFA_PENDING_TTL_SEC = 600;
-
-const getMappedStatusCode = (error: Error): number => {
-    switch (error.name) {
-        case 'UserNotFoundError':
-            return 404;
-        case 'PasswordMismatchError':
-        case 'PendingTwofaExpiredError':
-        case 'InvalidTwofaCodeError':
-        case 'InvalidTwofaPayloadError':
-            return 400;
-        case 'PasswordAlreadyUpdatedError':
-            return 409;
-        case 'TwofaCacheWriteError':
-        case 'TwofaCacheReadError':
-            return 503;
-        case 'TwofaQrGenerationError':
-            return 500;
-        default:
-            return 500;
-    }
-};
-
-const wrapServiceError = (context: string, error: unknown): AppError => {
-    if (error instanceof AppError) {
-        return new AppError(error.statusCode, `[${context}] ${error.message}`, error.code);
-    }
-
-    const msg = error instanceof Error ? error.message : String(error);
-
-    if (error instanceof Error) {
-        return new AppError(getMappedStatusCode(error), `[${context}] ${msg}`, error.name);
-    }
-
-    return new AppError(500, `[${context}] ${msg}`);
-};
 
 const removeFileIfExists = async (filePath: string): Promise<void> => {
     try {
@@ -172,17 +137,12 @@ export const updateMyAvatarService = async (
 
         const avatarLookup = await findActiveUserAvatarForUpdate(client, context.userId);
         if (!avatarLookup.exists) {
-            const notFoundError = new Error('使用者不存在或資料異常');
-            notFoundError.name = 'UserNotFoundError';
-            throw notFoundError;
+            throw new AppError(404, '使用者不存在或資料異常');
         }
 
         const updated = await updateUserAvatarKey(client, context.userId, avatarUrl);
         if (!updated) {
-            const updateError = new Error('使用者不存在或資料異常');
-            // 指定名稱後，在上層更容易做錯誤分類
-            updateError.name = 'UserNotFoundError';
-            throw updateError;
+            throw new AppError(404, '使用者不存在或資料異常');
         }
 
         await recordUserLogService(
@@ -214,15 +174,12 @@ export const updateMyAvatarService = async (
             try {
                 await client.query('ROLLBACK');
             } catch (rollbackError) {
-                throw wrapServiceError(
-                    'userSecurityService.updateMyAvatar.rollback',
-                    rollbackError,
-                );
+                throw toAppError('userSecurityService.updateMyAvatar.rollback', rollbackError);
             }
         }
 
         await removeFileIfExists(absFilePath);
-        throw wrapServiceError('userSecurityService.updateMyAvatar', error);
+        throw toAppError('userSecurityService.updateMyAvatar', error);
     } finally {
         if (client) {
             client.release();
@@ -239,17 +196,13 @@ export const deleteMyAvatarService = async (context: UserActionContext): Promise
 
         const avatarLookup = await findActiveUserAvatarForUpdate(client, context.userId);
         if (!avatarLookup.exists) {
-            const notFoundError = new Error('使用者不存在或資料異常');
-            notFoundError.name = 'UserNotFoundError';
-            throw notFoundError;
+            throw new AppError(404, '使用者不存在或資料異常');
         }
 
         if (avatarLookup.avatarKey !== null) {
             const updated = await clearUserAvatarKey(client, context.userId);
             if (!updated) {
-                const updateError = new Error('使用者不存在或資料異常');
-                updateError.name = 'UserNotFoundError';
-                throw updateError;
+                throw new AppError(404, '使用者不存在或資料異常');
             }
         }
 
@@ -272,14 +225,11 @@ export const deleteMyAvatarService = async (context: UserActionContext): Promise
             try {
                 await client.query('ROLLBACK');
             } catch (rollbackError) {
-                throw wrapServiceError(
-                    'userSecurityService.deleteMyAvatar.rollback',
-                    rollbackError,
-                );
+                throw toAppError('userSecurityService.deleteMyAvatar.rollback', rollbackError);
             }
         }
 
-        throw wrapServiceError('userSecurityService.deleteMyAvatar', error);
+        throw toAppError('userSecurityService.deleteMyAvatar', error);
     } finally {
         if (client) {
             client.release();
@@ -300,9 +250,7 @@ export const setup2faService = async (
         try {
             qrCode = await toDataUrl(otpauthUrl);
         } catch {
-            const qrError = new Error('無法產生驗證 QR Code');
-            qrError.name = 'TwofaQrGenerationError';
-            throw qrError;
+            throw new AppError(500, '無法產生驗證 QR Code');
         }
 
         // 16 bytes 轉成16進位字串，每 1 byte 轉成 2 個 hex 字元
@@ -321,9 +269,7 @@ export const setup2faService = async (
                 TWOFA_PENDING_TTL_SEC,
             );
         } catch {
-            const redisError = new Error('系統暫時無法設定 2FA，請稍後再試');
-            redisError.name = 'TwofaCacheWriteError';
-            throw redisError;
+            throw new AppError(503, '系統暫時無法設定 2FA，請稍後再試');
         }
 
         await recordUserLogService(context.userId, UserLogActionEnum.SETUP_2FA, {
@@ -342,7 +288,7 @@ export const setup2faService = async (
             randomCode,
         };
     } catch (error) {
-        throw wrapServiceError('userSecurityService.setup2fa', error);
+        throw toAppError('userSecurityService.setup2fa', error);
     }
 };
 
@@ -359,15 +305,11 @@ export const enable2faService = async (
         try {
             raw = await cacheGet(redisKey);
         } catch {
-            const redisError = new Error('系統暫時無法啟用 2FA / Redis 讀取失敗');
-            redisError.name = 'TwofaCacheReadError';
-            throw redisError;
+            throw new AppError(503, '系統暫時無法啟用 2FA / Redis 讀取失敗');
         }
 
         if (!raw) {
-            const expiredError = new Error('2FA 設定已過期，請重新開始');
-            expiredError.name = 'PendingTwofaExpiredError';
-            throw expiredError;
+            throw new AppError(400, '2FA 設定已過期，請重新開始');
         }
 
         const parsedData = JSON.parse(raw) as {
@@ -383,9 +325,7 @@ export const enable2faService = async (
 
         const isValid = verifyTotpCode(input.code, secret);
         if (!isValid) {
-            const invalidCodeError = new Error('驗證碼錯誤');
-            invalidCodeError.name = 'InvalidTwofaCodeError';
-            throw invalidCodeError;
+            throw new AppError(400, '驗證碼錯誤');
         }
 
         const backupCodes = generateBackupCodes(10);
@@ -396,9 +336,7 @@ export const enable2faService = async (
 
         const oldVersion = await findTwofaVersionForUpdate(client, context.userId);
         if (oldVersion === null) {
-            const notFoundError = new Error('使用者不存在或資料異常');
-            notFoundError.name = 'UserNotFoundError';
-            throw notFoundError;
+            throw new AppError(404, '使用者不存在或資料異常');
         }
 
         const newVersion = oldVersion + 1;
@@ -425,17 +363,15 @@ export const enable2faService = async (
             try {
                 await client.query('ROLLBACK');
             } catch (rollbackError) {
-                throw wrapServiceError('userSecurityService.enable2fa.rollback', rollbackError);
+                throw toAppError('userSecurityService.enable2fa.rollback', rollbackError);
             }
         }
 
         if (error instanceof SyntaxError) {
-            const payloadError = new Error('資料解析失敗');
-            payloadError.name = 'InvalidTwofaPayloadError';
-            throw wrapServiceError('userSecurityService.enable2fa', payloadError);
+            throw toAppError('userSecurityService.enable2fa', new AppError(400, '資料解析失敗'));
         }
 
-        throw wrapServiceError('userSecurityService.enable2fa', error);
+        throw toAppError('userSecurityService.enable2fa', error);
     } finally {
         if (client) {
             client.release();
@@ -455,9 +391,7 @@ export const disable2faService = async (
 
         const oldVersion = await findTwofaVersionForUpdate(client, context.userId);
         if (oldVersion === null) {
-            const notFoundError = new Error('使用者不存在或資料異常');
-            notFoundError.name = 'UserNotFoundError';
-            throw notFoundError;
+            throw new AppError(404, '使用者不存在或資料異常');
         }
 
         await disableTwofaAndRevokeSessions(client, context.userId, oldVersion);
@@ -479,11 +413,11 @@ export const disable2faService = async (
             try {
                 await client.query('ROLLBACK');
             } catch (rollbackError) {
-                throw wrapServiceError('userSecurityService.disable2fa.rollback', rollbackError);
+                throw toAppError('userSecurityService.disable2fa.rollback', rollbackError);
             }
         }
 
-        throw wrapServiceError('userSecurityService.disable2fa', error);
+        throw toAppError('userSecurityService.disable2fa', error);
     } finally {
         if (client) {
             client.release();
@@ -503,9 +437,7 @@ export const softDeleteMyAccountService = async (
 
         const deleted = await softDeleteUserAndRevokeSessions(client, context.userId);
         if (!deleted) {
-            const notFoundError = new Error('使用者不存在或資料異常');
-            notFoundError.name = 'UserNotFoundError';
-            throw notFoundError;
+            throw new AppError(404, '使用者不存在或資料異常');
         }
 
         await client.query('COMMIT');
@@ -525,14 +457,11 @@ export const softDeleteMyAccountService = async (
             try {
                 await client.query('ROLLBACK');
             } catch (rollbackError) {
-                throw wrapServiceError(
-                    'userSecurityService.softDeleteMyAccount.rollback',
-                    rollbackError,
-                );
+                throw toAppError('userSecurityService.softDeleteMyAccount.rollback', rollbackError);
             }
         }
 
-        throw wrapServiceError('userSecurityService.softDeleteMyAccount', error);
+        throw toAppError('userSecurityService.softDeleteMyAccount', error);
     } finally {
         if (client) {
             client.release();

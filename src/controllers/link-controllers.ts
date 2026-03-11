@@ -37,7 +37,7 @@ export const createShortUrl = async (req: Request, res: Response, next: NextFunc
     }
 
     try {
-        const result = await createShortUrlService(parsed.data, req.ip ?? null);
+        const result = await createShortUrlService(parsed.data, req.ip ?? null, req.user!.id);
 
         return res.status(201).json({
             ok: true,
@@ -88,6 +88,7 @@ export const getAllLinks = async (req: Request, res: Response, next: NextFunctio
             pageSize,
             includeExpired,
             includeInactive,
+            userId: req.user!.id,
         });
 
         return res.status(200).json({
@@ -120,7 +121,7 @@ export const deleteLink = async (req: Request, res: Response, next: NextFunction
         if (!deleted) {
             return res.status(404).json({
                 ok: false,
-                err: `${id} 不存在`,
+                error: `${id} 不存在`,
             });
         }
 
@@ -139,7 +140,7 @@ export const deactivateLink = async (req: Request, res: Response, next: NextFunc
     if (!parsed.success) {
         return res.status(400).json({
             ok: false,
-            err: 'id 必須是正整數',
+            error: 'id 必須是正整數',
         });
     }
 
@@ -150,34 +151,34 @@ export const deactivateLink = async (req: Request, res: Response, next: NextFunc
         if (result.status === 'deactivated') {
             return res.status(200).json({
                 ok: true,
-                msg: `${id} 已停用`,
+                message: `${id} 已停用`,
             });
         }
 
         if (result.status === 'not_found') {
             return res.status(404).json({
                 ok: false,
-                err: `${id} 不存在`,
+                error: `${id} 不存在`,
             });
         }
 
         if (result.status === 'already_inactive') {
             return res.status(409).json({
                 ok: false,
-                err: `id=${id} 已是停用狀態`,
+                error: `id=${id} 已是停用狀態`,
             });
         }
 
         if (result.status === 'expired') {
             return res.status(410).json({
                 ok: false,
-                err: `id=${id} 已過期`,
+                error: `id=${id} 已過期`,
             });
         }
 
         return res.status(409).json({
             ok: false,
-            message: `${id} 無法停用(未知錯誤)`,
+            error: `${id} 無法停用(未知錯誤)`,
         });
     } catch (err) {
         next(err);

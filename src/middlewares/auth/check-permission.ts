@@ -15,11 +15,6 @@ export function checkPermission(module: string, type: string) {
                 });
             }
 
-            // 如果是管理員，就執行放行
-            if (userRole === 'admin') {
-                return next();
-            }
-
             // 檢查 Redis 中是否有此權限
             const redisKey = buildCacheKey('role', `${userRole}:permissions`);
             const permission = `${module}:${type}`;

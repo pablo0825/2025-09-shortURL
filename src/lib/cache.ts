@@ -49,10 +49,6 @@ export const cacheExists = async (key: string): Promise<boolean> => {
     return count > 0;
 };
 
-export const cacheSetNoTtl = async (key: string, value: string): Promise<void> => {
-    await redisClient.set(key, value);
-};
-
 export const cacheIncr = async (key: string): Promise<number> => {
     // 對 key 做 +1 的計數，並回傳加後的值
     // 可用於 登入失敗次數, rateLimit 計數, 發送驗證碼次數控制
