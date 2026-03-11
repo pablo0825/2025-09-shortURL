@@ -7,6 +7,7 @@ import jwt, {
     NotBeforeError,
     JsonWebTokenError,
 } from 'jsonwebtoken';
+import { randomUUID } from 'node:crypto';
 import { AccessPayloadSchema, RefreshPayloadSchema } from '../schemas/jwt-schema';
 
 // 在原本的id, name, email, role等型別上，加上JwtPayload對型別的限制
@@ -95,8 +96,9 @@ export class jwtProvider {
     }
 
     // [功能2] 產生 refresh token
-    public generateRefreshToken(raw: string): string {
+    public generateRefreshToken(raw: string): { token: string; jti: string } {
         const id = RefreshPayloadSchema.parse(raw);
+        const jti = randomUUID();
         const options: SignOptions = {
             // SignOptions["expiresIn"]表示的型別為string | number
             // 告訴編譯器說，我知道JWT_ACCESS_EXPIRATION是string，但相信我，這個字的值裡面有"1h"
@@ -105,12 +107,14 @@ export class jwtProvider {
             issuer: this.ISSUER,
             audience: this.AUDIENCE,
             subject: id.toString(), // 建議把 id 放在 sub，也會同時保留在 payload
+            jwtid: jti,
         };
         // payload 實際資料，用id是因為refresh不用太多資料，因為它的用途很單純，就是幫助access重新被取得
         // 所以payload不用太多資料，用id就好
         // secret 私鑰
         // options 選項設定，如:過期時間、指定演算法
-        return jwt.sign({ id: id }, this.JWT_REFRESH_SECRET, options);
+        const token = jwt.sign({ id: id }, this.JWT_REFRESH_SECRET, options);
+        return { token, jti };
     }
 
     // [功能3] token解碼

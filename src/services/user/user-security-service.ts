@@ -1,5 +1,3 @@
-import type { PoolClient } from 'pg';
-import { pool } from '../../db/pool';
 import path from 'path';
 import fs from 'fs/promises';
 import sharp from 'sharp';
@@ -14,6 +12,7 @@ import { toDataUrl } from '../../utils/qrcode';
 import { encrypt, decrypt } from '../../utils/crypto-utils';
 import { generateBackupCodes, hashBackupCodes } from '../../utils/backup-codes';
 import { AppError, toAppError } from '../../utils/app-error';
+import { withTransaction } from '../../db/transaction';
 import { buildCacheKey, cacheDel, cacheGet, cacheSet } from '../../lib/cache';
 import {
     clearUserAvatarKey,
@@ -107,8 +106,6 @@ export const updateMyAvatarService = async (
     const absFilePath = safeJoin(userDir, filename);
     const avatarUrl = `/static/avatars/${userIdStr}/${filename}`;
 
-    let client: PoolClient | undefined;
-
     try {
         // sharp 是圖片處理工具
         // 用 sharp 讀取 memory 的圖片資料 (buffer)
@@ -129,87 +126,72 @@ export const updateMyAvatarService = async (
         // 寫入檔案到指定路徑
         await fs.writeFile(absFilePath, webBuffer);
 
-        client = await pool.connect();
-        await client.query('BEGIN');
-
         // 策略就是，先拿 old avatar key，然後 update new avatar key 到 db
         // 最後刪除 old avatar key 的路徑的檔案
 
-        const avatarLookup = await findActiveUserAvatarForUpdate(client, context.userId);
-        if (!avatarLookup.exists) {
-            throw new AppError(404, '使用者不存在或資料異常');
-        }
+        const oldAvatarKey = await withTransaction(async (client) => {
+            const avatarLookup = await findActiveUserAvatarForUpdate(client, context.userId);
+            if (!avatarLookup.exists) {
+                throw new AppError(404, '使用者不存在或資料異常');
+            }
 
-        const updated = await updateUserAvatarKey(client, context.userId, avatarUrl);
-        if (!updated) {
-            throw new AppError(404, '使用者不存在或資料異常');
-        }
+            const updated = await updateUserAvatarKey(client, context.userId, avatarUrl);
+            if (!updated) {
+                throw new AppError(404, '使用者不存在或資料異常');
+            }
 
-        await recordUserLogService(
-            context.userId,
-            UserLogActionEnum.UPDATE_AVATAR,
-            {
-                detail: '使用者請求更新使用者頭像',
-                metadata: {
-                    name: context.userName,
-                    filename,
-                    url: avatarUrl,
-                    type: input.fileType,
+            await recordUserLogService(
+                context.userId,
+                UserLogActionEnum.UPDATE_AVATAR,
+                {
+                    detail: '使用者請求更新使用者頭像',
+                    metadata: {
+                        name: context.userName,
+                        filename,
+                        url: avatarUrl,
+                        type: input.fileType,
+                    },
+                    ipAddress: context.ip,
+                    userAgent: context.userAgent,
                 },
-                ipAddress: context.ip,
-                userAgent: context.userAgent,
-            },
-            client,
-        );
+                client,
+            );
 
-        await client.query('COMMIT');
-        await removeOldAvatarIfAllowed(context.userId, avatarLookup.avatarKey);
+            return avatarLookup.avatarKey;
+        });
+
+        await removeOldAvatarIfAllowed(context.userId, oldAvatarKey);
 
         return {
             filename,
             url: avatarUrl,
         };
     } catch (error) {
-        if (client) {
-            try {
-                await client.query('ROLLBACK');
-            } catch (rollbackError) {
-                throw toAppError('userSecurityService.updateMyAvatar.rollback', rollbackError);
-            }
-        }
-
         await removeFileIfExists(absFilePath);
         throw toAppError('userSecurityService.updateMyAvatar', error);
-    } finally {
-        if (client) {
-            client.release();
-        }
     }
 };
 
 export const deleteMyAvatarService = async (context: UserActionContext): Promise<void> => {
-    let client: PoolClient | undefined;
-
     try {
-        client = await pool.connect();
-        await client.query('BEGIN');
-
-        const avatarLookup = await findActiveUserAvatarForUpdate(client, context.userId);
-        if (!avatarLookup.exists) {
-            throw new AppError(404, '使用者不存在或資料異常');
-        }
-
-        if (avatarLookup.avatarKey !== null) {
-            const updated = await clearUserAvatarKey(client, context.userId);
-            if (!updated) {
+        const oldAvatarKey = await withTransaction(async (client) => {
+            const avatarLookup = await findActiveUserAvatarForUpdate(client, context.userId);
+            if (!avatarLookup.exists) {
                 throw new AppError(404, '使用者不存在或資料異常');
             }
-        }
 
-        await client.query('COMMIT');
+            if (avatarLookup.avatarKey !== null) {
+                const updated = await clearUserAvatarKey(client, context.userId);
+                if (!updated) {
+                    throw new AppError(404, '使用者不存在或資料異常');
+                }
+            }
 
-        if (avatarLookup.avatarKey !== null) {
-            await removeOldAvatarIfAllowed(context.userId, avatarLookup.avatarKey);
+            return avatarLookup.avatarKey;
+        });
+
+        if (oldAvatarKey !== null) {
+            await removeOldAvatarIfAllowed(context.userId, oldAvatarKey);
         }
 
         await recordUserLogService(context.userId, UserLogActionEnum.DELETE_AVATAR, {
@@ -221,19 +203,7 @@ export const deleteMyAvatarService = async (context: UserActionContext): Promise
             userAgent: context.userAgent,
         });
     } catch (error) {
-        if (client) {
-            try {
-                await client.query('ROLLBACK');
-            } catch (rollbackError) {
-                throw toAppError('userSecurityService.deleteMyAvatar.rollback', rollbackError);
-            }
-        }
-
         throw toAppError('userSecurityService.deleteMyAvatar', error);
-    } finally {
-        if (client) {
-            client.release();
-        }
     }
 };
 
@@ -297,11 +267,9 @@ export const enable2faService = async (
     input: EnableTwofaDto,
 ): Promise<EnableTwofaResult> => {
     const redisKey = buildCacheKey('2fa_pending', `${context.userId}:${input.nonce}`);
-    let client: PoolClient | undefined;
 
     try {
         let raw: string | null;
-
         try {
             raw = await cacheGet(redisKey);
         } catch {
@@ -312,11 +280,12 @@ export const enable2faService = async (
             throw new AppError(400, '2FA 設定已過期，請重新開始');
         }
 
-        const parsedData = JSON.parse(raw) as {
-            encrypted: string;
-            iv: string;
-            authTag: string;
-        };
+        let parsedData: { encrypted: string; iv: string; authTag: string };
+        try {
+            parsedData = JSON.parse(raw) as { encrypted: string; iv: string; authTag: string };
+        } catch {
+            throw new AppError(400, '資料解析失敗');
+        }
 
         const encrypted = Buffer.from(parsedData.encrypted, 'base64');
         const iv = Buffer.from(parsedData.iv, 'base64');
@@ -331,19 +300,17 @@ export const enable2faService = async (
         const backupCodes = generateBackupCodes(10);
         const backupHashes = await hashBackupCodes(backupCodes);
 
-        client = await pool.connect();
-        await client.query('BEGIN');
+        await withTransaction(async (client) => {
+            const oldVersion = await findTwofaVersionForUpdate(client, context.userId);
+            if (oldVersion === null) {
+                throw new AppError(404, '使用者不存在或資料異常');
+            }
 
-        const oldVersion = await findTwofaVersionForUpdate(client, context.userId);
-        if (oldVersion === null) {
-            throw new AppError(404, '使用者不存在或資料異常');
-        }
+            const newVersion = oldVersion + 1;
+            await enableTwofaForUser(client, context.userId, encrypted, iv, authTag, newVersion);
+            await insertBackupCodeHashes(client, context.userId, newVersion, backupHashes);
+        });
 
-        const newVersion = oldVersion + 1;
-        await enableTwofaForUser(client, context.userId, encrypted, iv, authTag, newVersion);
-        await insertBackupCodeHashes(client, context.userId, newVersion, backupHashes);
-
-        await client.query('COMMIT');
         await cacheDel(redisKey);
 
         await recordUserLogService(context.userId, UserLogActionEnum.ENABLE_2FA, {
@@ -351,7 +318,6 @@ export const enable2faService = async (
             metadata: {
                 name: context.userName,
                 method: 'totp',
-                version: newVersion,
             },
             ipAddress: context.ip,
             userAgent: context.userAgent,
@@ -359,23 +325,7 @@ export const enable2faService = async (
 
         return { backupCodes };
     } catch (error) {
-        if (client) {
-            try {
-                await client.query('ROLLBACK');
-            } catch (rollbackError) {
-                throw toAppError('userSecurityService.enable2fa.rollback', rollbackError);
-            }
-        }
-
-        if (error instanceof SyntaxError) {
-            throw toAppError('userSecurityService.enable2fa', new AppError(400, '資料解析失敗'));
-        }
-
         throw toAppError('userSecurityService.enable2fa', error);
-    } finally {
-        if (client) {
-            client.release();
-        }
     }
 };
 
@@ -383,19 +333,14 @@ export const disable2faService = async (
     context: UserActionContext,
     authorizationHeader?: string | null,
 ): Promise<void> => {
-    let client: PoolClient | undefined;
-
     try {
-        client = await pool.connect();
-        await client.query('BEGIN');
-
-        const oldVersion = await findTwofaVersionForUpdate(client, context.userId);
-        if (oldVersion === null) {
-            throw new AppError(404, '使用者不存在或資料異常');
-        }
-
-        await disableTwofaAndRevokeSessions(client, context.userId, oldVersion);
-        await client.query('COMMIT');
+        await withTransaction(async (client) => {
+            const oldVersion = await findTwofaVersionForUpdate(client, context.userId);
+            if (oldVersion === null) {
+                throw new AppError(404, '使用者不存在或資料異常');
+            }
+            await disableTwofaAndRevokeSessions(client, context.userId, oldVersion);
+        });
 
         await recordUserLogService(context.userId, UserLogActionEnum.DISABLE_2FA, {
             detail: '使用者停用2fa成功',
@@ -409,19 +354,7 @@ export const disable2faService = async (
 
         await handleAccessTokenBlackList(authorizationHeader);
     } catch (error) {
-        if (client) {
-            try {
-                await client.query('ROLLBACK');
-            } catch (rollbackError) {
-                throw toAppError('userSecurityService.disable2fa.rollback', rollbackError);
-            }
-        }
-
         throw toAppError('userSecurityService.disable2fa', error);
-    } finally {
-        if (client) {
-            client.release();
-        }
     }
 };
 
@@ -429,18 +362,13 @@ export const softDeleteMyAccountService = async (
     context: UserActionContext,
     authorizationHeader?: string | null,
 ): Promise<void> => {
-    let client: PoolClient | undefined;
-
     try {
-        client = await pool.connect();
-        await client.query('BEGIN');
-
-        const deleted = await softDeleteUserAndRevokeSessions(client, context.userId);
-        if (!deleted) {
-            throw new AppError(404, '使用者不存在或資料異常');
-        }
-
-        await client.query('COMMIT');
+        await withTransaction(async (client) => {
+            const deleted = await softDeleteUserAndRevokeSessions(client, context.userId);
+            if (!deleted) {
+                throw new AppError(404, '使用者不存在或資料異常');
+            }
+        });
 
         await recordUserLogService(context.userId, UserLogActionEnum.DELETE_ACCOUNT, {
             detail: '使用者軟刪除帳號成功',
@@ -453,18 +381,6 @@ export const softDeleteMyAccountService = async (
 
         await handleAccessTokenBlackList(authorizationHeader);
     } catch (error) {
-        if (client) {
-            try {
-                await client.query('ROLLBACK');
-            } catch (rollbackError) {
-                throw toAppError('userSecurityService.softDeleteMyAccount.rollback', rollbackError);
-            }
-        }
-
         throw toAppError('userSecurityService.softDeleteMyAccount', error);
-    } finally {
-        if (client) {
-            client.release();
-        }
     }
 };

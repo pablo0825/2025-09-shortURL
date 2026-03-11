@@ -2,10 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import crypto from 'crypto';
 import path from 'path';
 
-const { queryMock, releaseMock, writeFileMock, unlinkMock, mkdirMock, toBufferMock } = vi.hoisted(
+const { writeFileMock, unlinkMock, mkdirMock, toBufferMock } = vi.hoisted(
     () => ({
-        queryMock: vi.fn(),
-        releaseMock: vi.fn(),
         writeFileMock: vi.fn(),
         unlinkMock: vi.fn(),
         mkdirMock: vi.fn(),
@@ -13,10 +11,8 @@ const { queryMock, releaseMock, writeFileMock, unlinkMock, mkdirMock, toBufferMo
     }),
 );
 
-vi.mock('../../src/db/pool', () => ({
-    pool: {
-        connect: vi.fn(),
-    },
+vi.mock('../../src/db/transaction', () => ({
+    withTransaction: vi.fn(async (runner: (client: unknown) => Promise<unknown>) => runner({})),
 }));
 
 vi.mock('../../src/repositories/user/user-security-repository', () => ({
@@ -85,12 +81,7 @@ vi.mock('sharp', () => ({
     })),
 }));
 
-const fakeClient = {
-    query: queryMock,
-    release: releaseMock,
-};
-
-import { pool } from '../../src/db/pool';
+import { withTransaction } from '../../src/db/transaction';
 import {
     clearUserAvatarKey,
     disableTwofaAndRevokeSessions,
@@ -117,7 +108,7 @@ import {
     updateMyAvatarService,
 } from '../../src/services/user/user-security-service';
 
-const mockedPool = vi.mocked(pool);
+const mockedWithTransaction = vi.mocked(withTransaction);
 const mockedFindActiveUserAvatarForUpdate = vi.mocked(findActiveUserAvatarForUpdate);
 const mockedUpdateUserAvatarKey = vi.mocked(updateUserAvatarKey);
 const mockedClearUserAvatarKey = vi.mocked(clearUserAvatarKey);
@@ -144,8 +135,10 @@ describe('user-security-service', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         vi.spyOn(crypto, 'randomUUID').mockReturnValue('00000000-0000-4000-8000-000000000000');
-        mockedPool.connect.mockResolvedValue(fakeClient as never);
-        queryMock.mockResolvedValue({ rowCount: 1 });
+        mockedWithTransaction.mockImplementation(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            async (runner: (client: any) => Promise<unknown>) => runner({}),
+        );
         toBufferMock.mockResolvedValue(Buffer.from('webp'));
         mkdirMock.mockResolvedValue(undefined);
         writeFileMock.mockResolvedValue(undefined);
@@ -195,24 +188,21 @@ describe('user-security-service', () => {
         );
     });
 
-    it('should throw rollback wrapped error when avatar rollback fails', async () => {
+    it('should delete temp file when transaction throws during avatar update', async () => {
         mockedUpdateUserAvatarKey.mockRejectedValue(new Error('update failed'));
-        queryMock.mockImplementation(async (sql: string) => {
-            if (sql === 'ROLLBACK') {
-                throw new Error('rollback failed');
-            }
-
-            return { rowCount: 1 };
-        });
 
         await expect(
             updateMyAvatarService(
                 { userId: 7, userName: 'u', ip: null, userAgent: null },
                 { fileBuffer: Buffer.from('raw') },
             ),
-        ).rejects.toThrow('[userSecurityService.updateMyAvatar.rollback] rollback failed');
+        ).rejects.toThrow('[userSecurityService.updateMyAvatar]');
 
-        expect(releaseMock).toHaveBeenCalledOnce();
+        expect(unlinkMock).toHaveBeenCalledWith(
+            expect.stringContaining(
+                path.join('uploads', 'avatars', '7', '00000000-0000-4000-8000-000000000000.webp'),
+            ),
+        );
     });
 
     it('should throw UserNotFoundError when updating avatar for missing user', async () => {
@@ -228,7 +218,6 @@ describe('user-security-service', () => {
             ),
         ).rejects.toMatchObject({ name: 'AppError', statusCode: 404 });
 
-        expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
         expect(unlinkMock).toHaveBeenCalledWith(
             expect.stringContaining(
                 path.join(
@@ -259,7 +248,6 @@ describe('user-security-service', () => {
             expect.stringContaining(path.join('uploads', 'avatars', '7', 'old.webp')),
         );
         expect(mockedWriteUserLogToDB).toHaveBeenCalled();
-        expect(queryMock).toHaveBeenCalledWith('COMMIT');
     });
 
     it('should skip clearing avatar when avatar key is already null', async () => {
@@ -294,8 +282,6 @@ describe('user-security-service', () => {
                 userAgent: null,
             }),
         ).rejects.toMatchObject({ name: 'AppError', statusCode: 404 });
-
-        expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
     });
 
     it('should throw UserNotFoundError when clearing avatar key fails', async () => {
@@ -313,8 +299,6 @@ describe('user-security-service', () => {
                 userAgent: null,
             }),
         ).rejects.toMatchObject({ name: 'AppError', statusCode: 404 });
-
-        expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
     });
 
     it('should throw TwofaQrGenerationError when qr code generation fails', async () => {
@@ -446,11 +430,9 @@ describe('user-security-service', () => {
                 { code: '123456', nonce: 'nonce' },
             ),
         ).rejects.toMatchObject({ name: 'AppError', statusCode: 404 });
-
-        expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
     });
 
-    it('should wrap rollback failure when enabling 2fa', async () => {
+    it('should propagate error when enabling 2fa DB operation fails', async () => {
         mockedCacheGet.mockResolvedValue(
             JSON.stringify({
                 encrypted: Buffer.from('enc').toString('base64'),
@@ -463,20 +445,13 @@ describe('user-security-service', () => {
         mockedGenerateBackupCodes.mockReturnValue(['c1', 'c2']);
         mockedHashBackupCodes.mockResolvedValue(['h1', 'h2']);
         mockedFindTwofaVersionForUpdate.mockRejectedValue(new Error('db read failed'));
-        queryMock.mockImplementation(async (sql: string) => {
-            if (sql === 'ROLLBACK') {
-                throw new Error('rollback failed');
-            }
-
-            return { rowCount: 1 };
-        });
 
         await expect(
             enable2faService(
                 { userId: 9, userName: 'u', ip: null, userAgent: null },
                 { code: '123456', nonce: 'nonce' },
             ),
-        ).rejects.toThrow('[userSecurityService.enable2fa.rollback] rollback failed');
+        ).rejects.toThrow('[userSecurityService.enable2fa]');
     });
 
     it('should throw UserNotFoundError when disabling 2fa for missing user', async () => {
@@ -485,8 +460,6 @@ describe('user-security-service', () => {
         await expect(
             disable2faService({ userId: 9, userName: 'u', ip: null, userAgent: null }, null),
         ).rejects.toMatchObject({ name: 'AppError', statusCode: 404 });
-
-        expect(queryMock).toHaveBeenCalledWith('ROLLBACK');
     });
 
     it('should soft-delete account and blacklist access token', async () => {
@@ -499,7 +472,6 @@ describe('user-security-service', () => {
 
         expect(mockedHandleAccessTokenBlackList).toHaveBeenCalledOnce();
         expect(mockedWriteUserLogToDB).toHaveBeenCalledOnce();
-        expect(queryMock).toHaveBeenCalledWith('COMMIT');
     });
 
     it('should throw UserNotFoundError when soft-delete target does not exist', async () => {
@@ -513,37 +485,23 @@ describe('user-security-service', () => {
         ).rejects.toMatchObject({ name: 'AppError', statusCode: 404 });
     });
 
-    it('should wrap rollback failure when soft-deleting account', async () => {
+    it('should propagate error when soft-delete DB operation fails', async () => {
         mockedSoftDeleteUserAndRevokeSessions.mockRejectedValue(new Error('db failed'));
-        queryMock.mockImplementation(async (sql: string) => {
-            if (sql === 'ROLLBACK') {
-                throw new Error('rollback failed');
-            }
-
-            return { rowCount: 1 };
-        });
 
         await expect(
             softDeleteMyAccountService(
                 { userId: 3, userName: 'u', ip: '1.1.1.1', userAgent: 'ua' },
                 null,
             ),
-        ).rejects.toThrow('[userSecurityService.softDeleteMyAccount.rollback] rollback failed');
+        ).rejects.toThrow('[userSecurityService.softDeleteMyAccount]');
     });
 
-    it('should rollback and wrap error when disable 2fa rollback fails', async () => {
+    it('should propagate error when disable 2fa DB operation fails', async () => {
         mockedFindTwofaVersionForUpdate.mockRejectedValue(new Error('db read failed'));
-        queryMock.mockImplementation(async (sql: string) => {
-            if (sql === 'ROLLBACK') {
-                throw new Error('rollback failed');
-            }
-
-            return { rowCount: 1 };
-        });
 
         await expect(
             disable2faService({ userId: 9, userName: 'u', ip: null, userAgent: null }, null),
-        ).rejects.toThrow('[userSecurityService.disable2fa.rollback] rollback failed');
+        ).rejects.toThrow('[userSecurityService.disable2fa]');
     });
 
     it('should call repository to revoke sessions during disable 2fa', async () => {
