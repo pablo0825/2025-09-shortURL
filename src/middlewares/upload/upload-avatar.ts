@@ -11,6 +11,7 @@ export const uploadAvatar = multer({
     // 檔案不會有重名的問題，因為 memory 會每個檔案，創造一個 buffer 物件，並掛到 req.file 下
 
     // 把檔案存到 memory
+    // 檔案內容會進到 req.file.buffer
     storage: multer.memoryStorage(),
     // 限制檔案大小
     limits: { fileSize: MAX_BYTES },
@@ -24,6 +25,7 @@ export const uploadAvatar = multer({
         }
         // 接受檔案
         // 第一個參數是錯誤，null表示沒有錯誤
+        // 第二個參數，表示允不允許檔案通過
         cb(null, true);
     },
     // 只接受一個檔案，欄位名稱必須是 avatar，成功後檔案會掛到 req.file

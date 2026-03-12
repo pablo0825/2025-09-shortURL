@@ -1,5 +1,5 @@
-import type { PoolClient } from 'pg';
 import { pool } from '../../db/pool';
+import { withTransaction } from '../../db/transaction';
 
 interface CreatedLinkRow {
     id: string;
@@ -71,12 +71,7 @@ export const createLinkRecord = async (
     creatorIp: string | null,
     creatorUserId: string,
 ): Promise<CreateLinkResult> => {
-    let client: PoolClient | undefined;
-
-    try {
-        client = await pool.connect();
-        await client.query('BEGIN');
-
+    return withTransaction(async (client) => {
         const created = await client.query<CreatedLinkRow>(
             'INSERT INTO links (long_url, creator_ip, creator_user_id) VALUES ($1, $2::INET, $3::BIGINT) RETURNING id::text, long_url, expire_at',
             [longUrl, creatorIp, creatorUserId],
@@ -115,20 +110,7 @@ export const createLinkRecord = async (
             longUrl: created.rows[0].long_url,
             expireAt: created.rows[0].expire_at,
         };
-    } catch (err) {
-        if (client) {
-            try {
-                await client.query('ROLLBACK');
-            } catch {
-                // ignore rollback failure
-            }
-        }
-        throw err;
-    } finally {
-        if (client) {
-            client.release();
-        }
-    }
+    });
 };
 
 export const findLinkByShortCode = async (code: string): Promise<RedirectLinkRow | null> => {

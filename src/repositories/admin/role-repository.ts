@@ -59,6 +59,7 @@ export const findRolesWithPermissionsForRbac = async (): Promise<RbacRolePermiss
     LEFT JOIN role_permissions rp ON rp.role_id = r.id
     LEFT JOIN permissions p ON p.id = rp.permissions_id
     ORDER BY r.id ASC, p.module ASC NULLS LAST, p.type ASC NULLS LAST, p.id ASC NULLS LAST`;
+    // NULL LAST 表示把 NULL 放在資料最後面
 
     const result = await pool.query<RbacRolePermissionRow>(sql);
     return result.rows;

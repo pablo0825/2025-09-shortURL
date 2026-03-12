@@ -131,11 +131,12 @@ describe('cache-short-url middleware', () => {
         } as unknown as Request;
         const res = createResponse();
         const next = vi.fn() as NextFunction;
+        const error = new Error('redis down');
 
-        mockCacheExists.mockRejectedValue(new Error('redis down'));
+        mockCacheExists.mockRejectedValue(error);
 
         await cacheShortUrl(req, res, next);
 
-        expect(next).toHaveBeenCalledTimes(1);
+        expect(next).toHaveBeenCalledWith(error);
     });
 });

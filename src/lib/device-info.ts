@@ -1,5 +1,13 @@
 import { UAParser } from 'ua-parser-js';
 
+
+// deviceType 設備裝置
+// deviceModel 設備型號
+// deviceVendor 設備品牌
+// osName 作業系統
+// osVersion 作業系統版本
+// browserName 瀏覽器名稱
+// browserVersion 瀏覽器型號
 export interface DeviceInfo {
     deviceType: string;
     deviceModel: string | null;

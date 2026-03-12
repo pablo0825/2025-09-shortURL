@@ -28,6 +28,11 @@ export async function validateAvatarFile(req: Request, res: Response, next: Next
             });
         }
 
+        // {
+        //     ext: 'png',
+        //     mime: 'image/png'
+        //   }
+        // 把結果存到 req.avatarFileType 裡面
         // 這裡可以選擇把「可信格式」存起來，後面 sharp 可用
         req.avatarFileType = fileType;
 

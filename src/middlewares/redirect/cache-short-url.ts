@@ -19,6 +19,7 @@ export async function cacheShortUrl(req: Request, res: Response, next: NextFunct
     }
 
     // 規範化字串，方便在redis中查詢
+    // short:{code}
     const key = buildCacheKey('short', code);
     const tomb = buildCacheKey('short404', code);
 
@@ -39,7 +40,7 @@ export async function cacheShortUrl(req: Request, res: Response, next: NextFunct
 
         // 快取命中，直接轉跳（快取寫入時已驗證過，不需重複驗證）
         return res.redirect(302, cached);
-    } catch {
-        return next();
+    } catch (err) {
+        return next(err);
     }
 }
